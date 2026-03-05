@@ -196,7 +196,7 @@
       <h1>Azure IQ Engine</h1>
       <p>Unified Knowledge for Work IQ · Fabric IQ · Foundry IQ</p>
     </div>
-    <span class="version-badge" id="version-badge">v0.2.4</span>
+    <span class="version-badge" id="version-badge">v0.3.0</span>
     <div class="header-actions">
       <button class="hdr-btn" id="clear-history-btn" title="Clear chat history">🗑️</button>
       <button class="hdr-btn" id="export-md-btn" title="Export as Markdown">📥</button>
@@ -209,6 +209,7 @@
     <div class="tab active" data-tab="ask">💬 Ask</div>
     <div class="tab" data-tab="research">🔍 Research</div>
     <div class="tab" data-tab="explore">📚 Explore</div>
+    <div class="tab" data-tab="quiz">🎯 Quiz</div>
   </div>
 
   <!-- Quick actions -->
@@ -309,6 +310,44 @@
           <div style="font-size:32px; opacity:.4; margin-bottom:8px;">📖</div>
           <p style="font-size:13px;">Search the indexed corpus directly — no LLM involved.</p>
           <p style="font-size:12px;">Results are ranked by Azure AI Search semantic reranking.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Quiz panel -->
+    <div id="quiz-panel" style="display:none; flex-direction:column; flex:1; overflow:hidden; padding:20px; gap:16px; overflow-y:auto;">
+      <div style="background:var(--bg2); border:1px solid var(--border); border-radius:var(--radius-lg); padding:20px;">
+        <h2 style="font-size:15px; color:var(--text); margin-bottom:8px;">🎯 IQ Knowledge Quiz</h2>
+        <p style="font-size:12px; color:var(--text-dim); margin-bottom:16px;">Test your knowledge of Microsoft's IQ layers and Azure services. Questions are generated from the indexed corpus.</p>
+        <div style="display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap;">
+          <select class="form-select" id="quiz-topic" style="max-width:200px;">
+            <option value="">All topics</option>
+            <option value="fabric-iq">Fabric IQ</option>
+            <option value="foundry-iq">Foundry IQ</option>
+            <option value="work-iq">Work IQ</option>
+            <option value="architecture">Architecture</option>
+          </select>
+          <select class="form-select" id="quiz-difficulty" style="max-width:160px;">
+            <option value="beginner">Beginner</option>
+            <option value="intermediate" selected>Intermediate</option>
+            <option value="advanced">Advanced</option>
+          </select>
+          <button class="send-btn" id="quiz-start-btn">Generate Quiz</button>
+        </div>
+        <div id="quiz-score" style="display:none; background:var(--bg3); border:1px solid var(--border); border-radius:var(--radius); padding:12px; margin-bottom:16px;">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <span style="font-size:13px; color:var(--text);" id="quiz-score-text">Score: 0/0</span>
+            <span style="font-size:12px; color:var(--text-dim);" id="quiz-streak-text"></span>
+          </div>
+          <div style="height:4px; background:var(--bg4); border-radius:2px; margin-top:8px; overflow:hidden;">
+            <div id="quiz-progress-bar" style="height:100%; background:var(--blue); width:0%; transition:width 0.3s;"></div>
+          </div>
+        </div>
+        <div id="quiz-container"></div>
+        <div id="quiz-empty" style="text-align:center; color:var(--text-muted); padding:40px;">
+          <div style="font-size:32px; opacity:.4; margin-bottom:8px;">🎯</div>
+          <p style="font-size:13px;">Choose a topic and difficulty, then click Generate Quiz.</p>
+          <p style="font-size:12px;">Questions are AI-generated from your indexed knowledge base.</p>
         </div>
       </div>
     </div>
@@ -430,6 +469,7 @@ const agentSelect   = document.getElementById('agent-select');
 const askPanel      = document.getElementById('ask-panel');
 const researchPanel = document.getElementById('research-panel');
 const explorePanel  = document.getElementById('explore-panel');
+const quizPanel     = document.getElementById('quiz-panel');
 const quickActions  = document.getElementById('quick-actions');
 const sourceStats   = document.getElementById('source-stats');
 
@@ -453,6 +493,7 @@ document.querySelectorAll('.tab').forEach(tab => {
     askPanel.style.display = currentTab === 'ask' ? 'flex' : 'none';
     researchPanel.classList.toggle('active', currentTab === 'research');
     explorePanel.style.display = currentTab === 'explore' ? 'flex' : 'none';
+    quizPanel.style.display = currentTab === 'quiz' ? 'flex' : 'none';
     quickActions.style.display = currentTab === 'ask' ? 'flex' : 'none';
   });
 });
@@ -831,6 +872,183 @@ function scrollBottom() {
 }
 function removeEl(el) {
   if (el && el.parentNode) el.parentNode.removeChild(el);
+}
+
+// ─── Quiz Mode ──────────────────────────────────────────────────────────────
+let quizState = { questions: [], current: 0, correct: 0, streak: 0 };
+
+document.getElementById('quiz-start-btn').addEventListener('click', generateQuiz);
+
+async function generateQuiz() {
+  const topic = document.getElementById('quiz-topic').value;
+  const difficulty = document.getElementById('quiz-difficulty').value;
+  const btn = document.getElementById('quiz-start-btn');
+  const container = document.getElementById('quiz-container');
+  const empty = document.getElementById('quiz-empty');
+  const scoreEl = document.getElementById('quiz-score');
+
+  btn.disabled = true;
+  btn.textContent = '⏳ Generating…';
+  container.innerHTML = '';
+  empty.style.display = 'none';
+
+  const topicLabel = topic || 'Microsoft IQ stack';
+  const prompt = `Generate a quiz with exactly 5 multiple-choice questions about ${topicLabel} at ${difficulty} difficulty level. Each question should have 4 options (A, B, C, D) with exactly one correct answer.
+
+Return ONLY valid JSON in this exact format (no markdown fences):
+{"questions":[{"q":"question text","options":["A) option","B) option","C) option","D) option"],"correct":0,"explanation":"brief explanation"}]}
+
+Where "correct" is the 0-based index of the correct option. Make questions specific, technical, and grounded in Azure/Microsoft IQ concepts.`;
+
+  try {
+    const res = await fetch('/api/query', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question: prompt }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+
+    let parsed;
+    try {
+      // Try to parse JSON from the answer
+      const answer = data.answer || '';
+      const jsonMatch = answer.match(/\{[\s\S]*"questions"[\s\S]*\}/);
+      if (jsonMatch) parsed = JSON.parse(jsonMatch[0]);
+      else parsed = JSON.parse(answer);
+    } catch {
+      container.innerHTML = `<div class="error-msg">⚠️ Could not parse quiz. Try again.</div>`;
+      return;
+    }
+
+    if (!parsed.questions || !parsed.questions.length) {
+      container.innerHTML = `<div class="error-msg">⚠️ No questions generated. Try a different topic.</div>`;
+      return;
+    }
+
+    quizState = { questions: parsed.questions, current: 0, correct: 0, streak: 0 };
+    scoreEl.style.display = 'block';
+    updateQuizScore();
+    renderQuizQuestion();
+  } catch (err) {
+    container.innerHTML = `<div class="error-msg">⚠️ Quiz generation failed: ${escHtml(err.message)}</div>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Generate Quiz';
+  }
+}
+
+function renderQuizQuestion() {
+  const { questions, current } = quizState;
+  if (current >= questions.length) {
+    renderQuizResults();
+    return;
+  }
+  const q = questions[current];
+  const container = document.getElementById('quiz-container');
+
+  let html = `<div style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius-lg);padding:16px;margin-bottom:12px;">
+    <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">Question ${current + 1} of ${questions.length}</div>
+    <div style="font-size:14px;color:var(--text);margin-bottom:14px;line-height:1.5;">${escHtml(q.q)}</div>
+    <div style="display:flex;flex-direction:column;gap:8px;" id="quiz-options">`;
+
+  q.options.forEach((opt, i) => {
+    html += `<button class="quiz-option" data-index="${i}" onclick="answerQuiz(${i})" style="
+      background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);
+      padding:10px 14px;font-size:13px;color:var(--text);cursor:pointer;text-align:left;
+      transition:all .15s;font-family:inherit;"
+      onmouseenter="this.style.borderColor='var(--blue)'"
+      onmouseleave="this.style.borderColor='var(--border)'"
+    >${escHtml(opt)}</button>`;
+  });
+
+  html += `</div>
+    <div id="quiz-explanation" style="display:none;margin-top:12px;padding:10px 14px;background:var(--bg2);border-radius:var(--radius);font-size:12px;color:var(--text-dim);border-left:3px solid var(--blue);"></div>
+    <button id="quiz-next-btn" style="display:none;margin-top:12px;background:var(--blue);border:none;color:#fff;padding:8px 16px;border-radius:var(--radius);font-size:13px;cursor:pointer;" onclick="nextQuizQuestion()">Next Question →</button>
+  </div>`;
+
+  container.innerHTML = html;
+}
+
+function answerQuiz(selected) {
+  const q = quizState.questions[quizState.current];
+  const correct = q.correct;
+  const options = document.querySelectorAll('.quiz-option');
+
+  // Disable all options
+  options.forEach((btn, i) => {
+    btn.disabled = true;
+    btn.style.cursor = 'default';
+    btn.onmouseenter = null;
+    btn.onmouseleave = null;
+    if (i === correct) {
+      btn.style.borderColor = 'var(--success)';
+      btn.style.background = 'rgba(16,124,16,.15)';
+    }
+    if (i === selected && selected !== correct) {
+      btn.style.borderColor = 'var(--error)';
+      btn.style.background = 'rgba(209,52,56,.15)';
+    }
+  });
+
+  if (selected === correct) {
+    quizState.correct++;
+    quizState.streak++;
+  } else {
+    quizState.streak = 0;
+  }
+
+  // Show explanation
+  const expEl = document.getElementById('quiz-explanation');
+  if (q.explanation) {
+    expEl.textContent = (selected === correct ? '✅ Correct! ' : '❌ Incorrect. ') + q.explanation;
+    expEl.style.display = 'block';
+    expEl.style.borderLeftColor = selected === correct ? 'var(--success)' : 'var(--error)';
+  }
+
+  // Show next button
+  document.getElementById('quiz-next-btn').style.display = 'inline-block';
+  updateQuizScore();
+}
+
+function nextQuizQuestion() {
+  quizState.current++;
+  renderQuizQuestion();
+}
+
+function updateQuizScore() {
+  const { questions, current, correct, streak } = quizState;
+  const answered = Math.min(current + 1, questions.length);
+  document.getElementById('quiz-score-text').textContent = `Score: ${correct}/${answered <= questions.length ? current : questions.length}`;
+  document.getElementById('quiz-streak-text').textContent = streak > 1 ? `🔥 ${streak} streak!` : '';
+  const pct = questions.length ? ((current) / questions.length * 100) : 0;
+  document.getElementById('quiz-progress-bar').style.width = pct + '%';
+}
+
+function renderQuizResults() {
+  const { questions, correct } = quizState;
+  const pct = Math.round(correct / questions.length * 100);
+  const emoji = pct >= 80 ? '🏆' : pct >= 60 ? '👍' : pct >= 40 ? '📚' : '💪';
+  const grade = pct >= 90 ? 'Expert' : pct >= 70 ? 'Proficient' : pct >= 50 ? 'Learning' : 'Beginner';
+
+  document.getElementById('quiz-progress-bar').style.width = '100%';
+  document.getElementById('quiz-score-text').textContent = `Final Score: ${correct}/${questions.length} (${pct}%)`;
+  document.getElementById('quiz-streak-text').textContent = '';
+
+  document.getElementById('quiz-container').innerHTML = `
+    <div style="text-align:center;padding:30px;background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius-lg);">
+      <div style="font-size:48px;margin-bottom:12px;">${emoji}</div>
+      <div style="font-size:20px;font-weight:600;color:var(--text);margin-bottom:4px;">${grade}</div>
+      <div style="font-size:14px;color:var(--text-dim);margin-bottom:16px;">You got ${correct} out of ${questions.length} correct (${pct}%)</div>
+      <button class="send-btn" onclick="document.getElementById('quiz-start-btn').click()" style="font-size:14px;padding:10px 24px;">Try Again</button>
+    </div>`;
+
+  // Save to localStorage
+  try {
+    const history = JSON.parse(localStorage.getItem('iq-quiz-history') || '[]');
+    history.push({ score: correct, total: questions.length, pct, ts: Date.now() });
+    localStorage.setItem('iq-quiz-history', JSON.stringify(history.slice(-20)));
+  } catch {}
 }
 </script>
 </body>
