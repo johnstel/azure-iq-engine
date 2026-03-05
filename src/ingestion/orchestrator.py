@@ -445,7 +445,7 @@ class IngestionOrchestrator:
             **doc,                          # preserve all crawler metadata
             "content": content,             # chunker reads this field
             "source_type": raw_source_type, # already correct from crawler
-            "url": doc.get("url") or (
+            "url": doc.get("url") or doc.get("source_url") or (
                 f"https://www.youtube.com/watch?v={doc['video_id']}"
                 if doc.get("video_id") else ""
             ),
