@@ -105,6 +105,7 @@ class VideoMetadata:
     channel_title: str
     transcript_text: str        # Full concatenated transcript
     transcript_language: str
+    transcript_segments: list[dict[str, Any]] = field(default_factory=list)  # [{text, start, duration}]
     iq_layers: list[str]        # e.g. ["foundry_iq", "fabric_iq"]
     azure_services: list[str]   # e.g. ["Azure OpenAI Service", "Microsoft Fabric"]
     fingerprint: str            # SHA-256(video_id + transcript_text)
@@ -183,33 +184,38 @@ def save_checkpoint(checkpoint: CrawlerCheckpoint, path: Path) -> None:
 # Transcript extraction
 # ---------------------------------------------------------------------------
 
-async def _fetch_transcript(video_id: str) -> tuple[str, str]:
+async def _fetch_transcript(video_id: str) -> tuple[str, str, list[dict[str, Any]]]:
     """
     Fetch transcript for a video using youtube-transcript-api.
 
-    Returns (transcript_text, language_code).
-    Falls back to empty string on failure (transcript not available, disabled, etc.).
+    Returns (transcript_text, language_code, segments).
+    segments = list of {"text": str, "start": float, "duration": float}.
+    Falls back to empty on failure.
     """
     try:
         from youtube_transcript_api import YouTubeTranscriptApi  # type: ignore
 
         loop = asyncio.get_running_loop()
 
-        def _fetch() -> tuple[str, str]:
+        def _fetch() -> tuple[str, str, list[dict[str, Any]]]:
             api = YouTubeTranscriptApi()
             transcript = api.fetch(video_id, languages=["en", "en-US", "en-GB"])
-            text = " ".join(snippet.text for snippet in transcript.snippets)
-            return text, transcript.language_code or "en"
+            segments = [
+                {"text": s.text, "start": s.start, "duration": s.duration}
+                for s in transcript.snippets
+            ]
+            text = " ".join(s.text for s in transcript.snippets)
+            return text, transcript.language_code or "en", segments
 
-        text, lang = await loop.run_in_executor(None, _fetch)
-        return text, lang
+        text, lang, segments = await loop.run_in_executor(None, _fetch)
+        return text, lang, segments
 
     except ImportError:
         logger.error("youtube-transcript-api not installed — pip install youtube-transcript-api")
-        return "", "unknown"
+        return "", "unknown", []
     except Exception as exc:
         logger.debug("No transcript for %s: %s", video_id, exc)
-        return "", "unknown"
+        return "", "unknown", []
 
 
 # ---------------------------------------------------------------------------
@@ -396,10 +402,10 @@ class YouTubeCrawler:
                     transcript_tasks = [
                         self._fetch_transcript_guarded(vid) for vid in video_ids
                     ]
-                    transcripts: list[tuple[str, str]] = await asyncio.gather(*transcript_tasks)
+                    transcripts: list[tuple[str, str, list[dict[str, Any]]]] = await asyncio.gather(*transcript_tasks)
 
                     # 5. Assemble records and yield
-                    for item, (transcript_text, lang) in zip(new_items, transcripts):
+                    for item, (transcript_text, lang, segments) in zip(new_items, transcripts):
                         video_id = item["contentDetails"]["videoId"]
                         snippet = item.get("snippet", {})
                         detail = details_map.get(video_id, {})
@@ -428,6 +434,7 @@ class YouTubeCrawler:
                             channel_title=channel_title,
                             transcript_text=transcript_text,
                             transcript_language=lang,
+                            transcript_segments=segments,
                             iq_layers=iq_layers,
                             azure_services=azure_services,
                             fingerprint=fingerprint,
@@ -471,7 +478,7 @@ class YouTubeCrawler:
     # Private helpers
     # ------------------------------------------------------------------
 
-    async def _fetch_transcript_guarded(self, video_id: str) -> tuple[str, str]:
+    async def _fetch_transcript_guarded(self, video_id: str) -> tuple[str, str, list[dict[str, Any]]]:
         """Fetch transcript with concurrency guard."""
         async with self.transcript_semaphore:
             return await _fetch_transcript(video_id)

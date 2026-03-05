@@ -450,6 +450,8 @@ class IngestionOrchestrator:
                 if doc.get("video_id") else ""
             ),
             "title": doc.get("title") or "",
+            # Map transcript_segments → transcript for TranscriptChunker
+            "transcript": doc.get("transcript_segments") or doc.get("transcript", []),
         }
 
         return self._chunker.chunk(normalised)
