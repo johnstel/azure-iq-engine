@@ -31,31 +31,18 @@ from typing import Any
 # ---------------------------------------------------------------------------
 from src.ingestion.chunker import ContentTypeAwareChunker, SourceType
 
-# Crawlers — MSLearnCrawler may be None if implementation is pending
 from src.ingestion.crawlers import (
-    MSLearnCrawler,          # TODO: verify/adjust once MSLearn crawler is implemented
+    MSLearnCrawler,
     YouTubeCrawler,
     AzureUpdatesCrawler,
     TechCommunityCrawler,
 )
 
-# TODO: Implement EmbeddingPipeline in src/ingestion/embedder.py
-# Expected interface:
-#   pipeline = EmbeddingPipeline()
-#   results  = await pipeline.embed_batch(chunks: list[dict]) -> list[dict]
-#   Each returned dict gains: "embedding": list[float], "token_count": int
 try:
     from src.ingestion.embedder import EmbeddingPipeline  # type: ignore[import]
 except ImportError:
     EmbeddingPipeline = None  # type: ignore[assignment,misc]
 
-# TODO: Implement SearchIndexer in src/ingestion/indexer.py
-# Expected interface:
-#   indexer = SearchIndexer()
-#   fps     = await indexer.get_existing_fingerprints() -> dict[str, str]
-#   result  = await indexer.index_batch(chunks: list[dict]) -> IndexResult
-#   count   = await indexer.get_index_document_count() -> int
-#   IndexResult must expose: .indexed int, .failed int
 try:
     from src.ingestion.indexer import SearchIndexer  # type: ignore[import]
 except ImportError:
@@ -88,7 +75,7 @@ class _SourceRoute:
 
 
 SOURCE_ROUTING: dict[str, _SourceRoute] = {
-    "mslearn":        _SourceRoute("ms-learn",          "content"),        # TODO: verify field once MSLearnCrawler lands
+    "mslearn":        _SourceRoute("ms-learn",          "content"),
     "youtube":        _SourceRoute("video-transcript",   "transcript_text"),
     "azure_updates":  _SourceRoute("azure-update",       "summary"),
     "techcommunity":  _SourceRoute("blog-post",          "body_text"),
@@ -349,12 +336,12 @@ class IngestionOrchestrator:
                     "MSLearnCrawler is not yet implemented — skipping 'mslearn' source."
                 )
                 return None
-            # TODO: Adjust MSLearnCrawler constructor kwargs once implementation lands.
-            #       Expected signature (TBD):
-            #         MSLearnCrawler(checkpoint_path=..., max_pages=..., force_recrawl=...)
-            return MSLearnCrawler(
-                checkpoint_path=checkpoint_dir / "mslearn_checkpoint.json",
+            from src.ingestion.crawlers.mslearn_crawler import CrawlerConfig as MSLearnCrawlerConfig  # noqa: PLC0415
+            mslearn_cfg = MSLearnCrawlerConfig(
+                checkpoint_path=str(checkpoint_dir / "mslearn_checkpoint.json"),
+                max_pages=max_pages if max_pages is not None else 2000,
             )
+            return MSLearnCrawler(mslearn_cfg)
 
         # Should never reach here — validated in __init__
         raise ValueError(f"No crawler registered for source '{source}'")
@@ -479,8 +466,6 @@ class IngestionOrchestrator:
             )
         else:
             try:
-                # TODO: SearchIndexer.get_existing_fingerprints() should return
-                #       dict[fingerprint_hash → chunk_id] for all indexed chunks.
                 indexer = SearchIndexer()
                 existing_fps = await indexer.get_existing_fingerprints()
                 logger.info(
@@ -537,9 +522,8 @@ class IngestionOrchestrator:
         embedded: list[dict[str, Any]] = []
         total_tokens = 0
 
-        # TODO: Tune batch size based on EmbeddingPipeline rate limits /
-        #       token-per-minute quota for Azure OpenAI text-embedding-3-large.
-        #       100 chunks/batch is a conservative safe default.
+        # EmbeddingPipeline.embed_batch is called with batches of up to 100 chunks.
+        # The method wraps embed_chunks (batch_size=16 internally) and adds token_count.
         BATCH_SIZE = 100  # noqa: N806
 
         for batch_start in range(0, len(chunks), BATCH_SIZE):
@@ -547,10 +531,6 @@ class IngestionOrchestrator:
                 break
             batch = chunks[batch_start : batch_start + BATCH_SIZE]
             try:
-                # TODO: EmbeddingPipeline.embed_batch should accept list[dict] and
-                #       return list[dict], where each output dict is the input chunk
-                #       enriched with: "embedding": list[float], "token_count": int,
-                #       optionally "embedding_model": str.
                 result_batch: list[dict[str, Any]] = await pipeline.embed_batch(batch)
                 embedded.extend(result_batch)
                 batch_tokens = sum(r.get("token_count", 0) for r in result_batch)
@@ -573,9 +553,7 @@ class IngestionOrchestrator:
         self._result.chunks_embedded = len(embedded)
         self._result.embedding_tokens = total_tokens
 
-        # TODO: Pull actual cost-per-token from EmbeddingPipeline config once
-        #       the module is implemented.  Rate as of 2025-01 for
-        #       text-embedding-3-large: $0.00013 / 1K tokens.
+        # text-embedding-3-large pricing: $0.00013 / 1K tokens (as of 2025-01).
         COST_PER_1K_TOKENS = 0.00013  # noqa: N806
         self._result.embedding_cost_usd = (total_tokens / 1_000) * COST_PER_1K_TOKENS
 
@@ -610,11 +588,8 @@ class IngestionOrchestrator:
 
         indexer = SearchIndexer()
 
-        # TODO: SearchIndexer.index_batch should accept list[dict] and return
-        #       an object with: .indexed int, .failed int.
-        #       Implement retry with exponential back-off for 429/503 responses.
-        #       AI Search accepts up to 1 000 documents per batch upload call;
-        #       500 is conservative to stay within request-size limits.
+        # AI Search accepts up to 1 000 documents per batch upload call;
+        # 500 is conservative to stay within request-size limits.
         BATCH_SIZE = 500  # noqa: N806
 
         total_indexed = 0
@@ -656,7 +631,6 @@ class IngestionOrchestrator:
 
         # Best-effort: retrieve total index size post-upload
         try:
-            # TODO: Implement get_index_document_count() on SearchIndexer.
             total_in_index: int = await indexer.get_index_document_count()
             logger.info("  ✅  Chunks indexed this run : %d", total_indexed)
             logger.info("  📊  Total docs in index now : %d", total_in_index)

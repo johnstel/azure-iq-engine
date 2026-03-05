@@ -794,6 +794,26 @@ class MSLearnCrawler:
     # Public API
     # ------------------------------------------------------------------
 
+    async def crawl_all(self) -> list[dict[str, Any]]:
+        """
+        Execute the full crawl and return normalised document dicts.
+
+        This is the pipeline-compatible interface expected by the orchestrator.
+        Each dict carries at minimum: ``url``, ``title``, ``content``,
+        ``source_type``, ``fingerprint``, ``iq_layers``, and ``azure_services``.
+
+        :returns: List of document dicts ready for chunking and indexing.
+        """
+        documents = await self.crawl()
+        result: list[dict[str, Any]] = []
+        for doc in documents:
+            d = doc.to_index_dict()
+            # Chunker reads doc["url"]; CrawledDocument stores the URL as source_url
+            if "url" not in d:
+                d["url"] = d.get("source_url", "")
+            result.append(d)
+        return result
+
     async def crawl(self) -> list[CrawledDocument]:
         """
         Execute the full crawl.

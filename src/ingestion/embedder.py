@@ -103,6 +103,28 @@ class EmbeddingPipeline:
 
     # ── Public API ──────────────────────────────────────────────────────────────
 
+    async def embed_batch(
+        self,
+        chunks: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """
+        Embed a batch of chunks, adding ``embedding`` and ``token_count`` fields.
+
+        This is the batch-oriented interface expected by the orchestrator.  Each
+        returned chunk gains an ``embedding`` key (list[float] or None) and a
+        ``token_count`` key (int, estimated from content length when not already
+        present).
+
+        :param chunks: List of chunk dicts from the chunker.
+        :returns: Same list with ``embedding`` and ``token_count`` populated.
+        """
+        embedded = await self.embed_chunks(chunks)
+        for chunk in embedded:
+            if "token_count" not in chunk:
+                content_len = len(chunk.get("content", ""))
+                chunk["token_count"] = max(1, content_len // _CHARS_PER_TOKEN_APPROX)
+        return embedded
+
     async def embed_chunks(
         self,
         chunks: list[dict[str, Any]],

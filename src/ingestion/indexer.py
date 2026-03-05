@@ -108,6 +108,77 @@ class SearchIndexer:
 
     # ── Public API ──────────────────────────────────────────────────────────────
 
+    async def get_existing_fingerprints(self) -> dict[str, str]:
+        """
+        Retrieve all ``chunk_id → fingerprint`` pairs stored in the index.
+
+        Returns an empty dict when the index is unavailable or unconfigured,
+        so the caller can treat all chunks as new without crashing.
+
+        :returns: Dict mapping chunk_id → fingerprint for every document in the index.
+        """
+        if not self._cfg.search_endpoint or not self._cfg.search_api_key:
+            logger.warning(
+                "SEARCH_ENDPOINT or SEARCH_API_KEY not configured — "
+                "returning empty fingerprint map."
+            )
+            return {}
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            return await self._fetch_existing_fingerprints(client)
+
+    async def index_batch(self, chunks: list[dict[str, Any]]) -> IndexStats:
+        """
+        Upload a batch of chunks to Azure AI Search without internal deduplication.
+
+        The orchestrator performs deduplication externally before calling this
+        method, so chunks passed here are always treated as new or updated.
+
+        :param chunks: Embedded chunk dicts to upload.
+        :returns: :class:`IndexStats` with ``.indexed`` and ``.failed`` counts.
+        :raises RuntimeError: If ``SEARCH_ENDPOINT`` or ``SEARCH_API_KEY`` are
+                              not configured.
+        """
+        self._validate_config()
+        stats = IndexStats(total=len(chunks))
+        if not chunks:
+            return stats
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            indexed, failed_ids = await self._upload_batch(client, chunks)
+            stats.indexed = indexed
+            stats.failed = len(failed_ids)
+            if failed_ids:
+                logger.error(
+                    "index_batch — %d document(s) failed permanently. chunk_ids: %s",
+                    len(failed_ids),
+                    failed_ids,
+                )
+        stats.log()
+        return stats
+
+    async def get_index_document_count(self) -> int:
+        """
+        Return the total number of documents currently stored in the index.
+
+        Queries the AI Search index statistics endpoint.  Returns 0 when the
+        count cannot be retrieved (e.g. index absent, network error, missing config).
+
+        :returns: Total document count as reported by AI Search, or 0 on failure.
+        """
+        if not self._cfg.search_endpoint or not self._cfg.search_api_key:
+            return 0
+        stats_url = self._cfg.index_url("stats")
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.get(stats_url, headers=self._auth_headers())
+                if response.status_code == 404:
+                    return 0
+                response.raise_for_status()
+                data = response.json()
+                return int(data.get("documentCount", 0))
+        except (httpx.HTTPStatusError, httpx.RequestError, ValueError, KeyError) as exc:
+            logger.warning("Could not retrieve index document count: %s", exc)
+            return 0
+
     async def index_chunks(
         self,
         chunks: list[dict[str, Any]],
