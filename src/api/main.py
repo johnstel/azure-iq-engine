@@ -17,6 +17,7 @@ Run locally:
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 import uuid
@@ -68,6 +69,40 @@ async def lifespan(app: FastAPI):
         bool(settings.foundry_base_url),
         bool(settings.search_endpoint),
     )
+
+    # Initialise Agent Framework agents and multi-agent workflows.
+    # Agents are stored in app.state so every request handler can access them
+    # without re-creating the client on every call.
+    app.state.agents: dict[str, Any] = {}
+    app.state.workflows: dict[str, Any] = {}
+
+    if settings.has_foundry:
+        try:
+            from agent_framework.azure import AzureOpenAIResponsesClient  # type: ignore[import]
+            from azure.identity import DefaultAzureCredential
+            from ..engine.agents import create_agents, create_workflows
+
+            client = AzureOpenAIResponsesClient(
+                credential=DefaultAzureCredential(),
+                endpoint=settings.foundry_base_url,
+            )
+            app.state.agents = create_agents(client)
+            app.state.workflows = create_workflows(app.state.agents)
+            logger.info(
+                "Agent Framework initialised — agents=%s  workflows=%s",
+                list(app.state.agents),
+                list(app.state.workflows),
+            )
+        except ImportError:
+            logger.warning(
+                "agent-framework package not installed — "
+                "agent routing will use direct RAG fallback"
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Agent Framework initialisation failed: %s", exc, exc_info=True)
+    else:
+        logger.warning("FOUNDRY_BASE_URL not configured — Agent Framework agents disabled")
+
     yield
     logger.info("Azure IQ Engine shutting down.")
 
@@ -341,6 +376,86 @@ async def _bing_search(query: str, count: int = 5) -> list[Citation]:
     return citations
 
 
+async def _run_agent_loop(agent: Any, message: str) -> tuple[str | None, int]:
+    """
+    Execute an Agent Framework agent or workflow's tool-calling loop.
+
+    Tries the most common async and sync run/invoke method names in order.
+    Returns ``(answer_text, tokens_used)`` on success, or ``(None, 0)`` when
+    the agent is unavailable or raises an exception, so the caller can fall
+    back to the plain RAG path.
+    """
+    try:
+        if hasattr(agent, "run_async"):
+            resp = await agent.run_async(message)
+        elif hasattr(agent, "invoke_async"):
+            resp = await agent.invoke_async(message)
+        elif hasattr(agent, "run"):
+            result = agent.run(message)
+            resp = await result if asyncio.iscoroutine(result) else result
+        elif hasattr(agent, "invoke"):
+            result = agent.invoke(message)
+            resp = await result if asyncio.iscoroutine(result) else result
+        else:
+            logger.warning("Agent has no recognised run/invoke method — skipping")
+            return None, 0
+
+        # Normalise the response to (text, tokens).
+        if isinstance(resp, str):
+            return resp, 0
+
+        answer: str = (
+            getattr(resp, "output", None)
+            or getattr(resp, "text", None)
+            or getattr(resp, "content", None)
+            or str(resp)
+        )
+        usage = getattr(resp, "usage", None)
+        tokens: int = 0
+        if isinstance(usage, dict):
+            tokens = int(usage.get("total_tokens", 0))
+        elif usage is not None:
+            tokens = int(getattr(usage, "total_tokens", 0))
+
+        return answer, tokens
+
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Agent/workflow run failed (%s) — falling back to RAG", exc, exc_info=True)
+        return None, 0
+
+
+def _parse_research_json(
+    raw: str,
+    *,
+    fallback_summary: str,
+) -> tuple[str, list[IQOpportunity], str]:
+    """
+    Parse a JSON research response produced by the LLM or a workflow.
+
+    Returns ``(summary, opportunities, recommended_approach)``.
+    Falls back gracefully when *raw* is not valid JSON.
+    """
+    default_approach = "Engage IQ specialist for detailed discovery."
+    try:
+        parsed = json.loads(raw)
+        summary = parsed.get("summary", fallback_summary)
+        recommended_approach = parsed.get("recommended_approach", default_approach)
+        opportunities: list[IQOpportunity] = [
+            IQOpportunity(
+                layer=opp.get("layer", "foundry-iq"),
+                title=opp.get("title", ""),
+                description=opp.get("description", ""),
+                services=opp.get("services", []),
+                priority=opp.get("priority", "medium"),
+            )
+            for opp in parsed.get("iq_opportunities", [])
+        ]
+        return summary, opportunities, recommended_approach
+    except (json.JSONDecodeError, KeyError, TypeError) as exc:
+        logger.warning("Could not parse LLM JSON response for research: %s", exc)
+        return fallback_summary, [], default_approach
+
+
 # ── Background ingestion task ─────────────────────────────────────────────────
 
 async def _run_ingestion(job_id: str, req: IngestRunRequest) -> None:
@@ -430,25 +545,39 @@ async def query_endpoint(req: QueryRequest, request: Request) -> QueryResponse:
     """
     Main Q&A endpoint.
 
-    Retrieves grounded context from Azure AI Search, builds a cited prompt,
-    and calls Azure OpenAI for the final answer.
+    Routes the question to the selected Agent Framework specialist agent whose
+    tool-calling loop handles search and reasoning internally. Falls back to a
+    direct search → RAG path when the Agent Framework is unavailable (e.g. the
+    agent-framework package is not installed or Foundry credentials are absent).
     """
     t0 = time.monotonic()
     settings = get_settings()
 
-    # 1 — Route to agent
-    agent = route_question(req.question, preferred_agent=req.agent)
+    # 1 — Route to the appropriate specialist agent name.
+    agent_name = route_question(req.question, preferred_agent=req.agent)
 
-    # 2 — Retrieve context from AI Search
-    results = await _search_index(
-        req.question,
-        top=req.top_k or settings.search_top_k,
-        iq_layer=req.iq_layers[0] if req.iq_layers else None,
-    )
+    # 2 — Try Agent Framework tool-calling loop for the selected agent.
+    agents: dict[str, Any] = getattr(request.app.state, "agents", {})
+    agent = agents.get(agent_name)
 
-    # 3 — Build grounded prompt and call LLM
-    system_prompt, user_prompt = _build_rag_prompt(req.question, results)
-    answer, tokens = await _call_openai(system_prompt, user_prompt)
+    answer: str | None = None
+    tokens: int = 0
+    results: list[SearchResult] = []
+
+    if agent is not None:
+        logger.debug("Routing question to Agent Framework agent '%s'", agent_name)
+        answer, tokens = await _run_agent_loop(agent, req.question)
+
+    # 3 — Fall back to direct RAG when the agent is unavailable or failed.
+    if answer is None:
+        logger.debug("Agent '%s' unavailable — using direct RAG fallback", agent_name)
+        results = await _search_index(
+            req.question,
+            top=req.top_k or settings.search_top_k,
+            iq_layer=req.iq_layers[0] if req.iq_layers else None,
+        )
+        system_prompt, user_prompt = _build_rag_prompt(req.question, results)
+        answer, tokens = await _call_openai(system_prompt, user_prompt)
 
     # 4 — Derive metadata
     citations = _results_to_citations(results)
@@ -464,7 +593,7 @@ async def query_endpoint(req: QueryRequest, request: Request) -> QueryResponse:
     return QueryResponse(
         answer=answer,
         citations=citations,
-        agent=agent,
+        agent=agent_name,
         iq_layers=req.iq_layers or iq_layers,
         confidence=round(confidence, 3),
         tokens_used=tokens,
@@ -475,82 +604,95 @@ async def query_endpoint(req: QueryRequest, request: Request) -> QueryResponse:
 # ── Research ──────────────────────────────────────────────────────────────────
 
 @app.post("/api/research", response_model=ResearchResponse, tags=["Research"])
-async def research_endpoint(req: ResearchRequest) -> ResearchResponse:
+async def research_endpoint(req: ResearchRequest, request: Request) -> ResearchResponse:
     """
     Customer research endpoint.
 
-    Combines Bing web search results with IQ corpus retrieval to generate
-    a structured opportunity assessment for a target company.
+    Drives the **customer-outcome** multi-agent workflow:
+    customer-researcher → iq-architect → story-weaver (sequential).
+
+    Falls back to direct Bing + AI Search + LLM synthesis when the
+    Agent Framework workflow is unavailable.
     """
     t0 = time.monotonic()
     settings = get_settings()
 
-    # 1 — Bing search: company context
-    bing_query = f"{req.company} Azure AI analytics cloud strategy"
-    if req.industry:
-        bing_query += f" {req.industry}"
-    web_citations = await _bing_search(bing_query, count=5)
+    # 1 — Attempt the customer-outcome workflow (researcher → architect → story-weaver).
+    workflows: dict[str, Any] = getattr(request.app.state, "workflows", {})
+    workflow = workflows.get("customer-outcome")
 
-    # 2 — AI Search: IQ opportunity context
-    iq_query = f"IQ opportunities {req.industry or 'enterprise'} {' '.join(req.focus_areas or [])}"
-    iq_results = await _search_index(iq_query, top=settings.search_top_k)
-    iq_citations = _results_to_citations(iq_results)
-
-    all_citations = web_citations + iq_citations
-
-    # 3 — Synthesise with LLM
-    context_web = "\n".join(
-        f"- {c.title}: {c.snippet}" for c in web_citations
-    ) or "No web results available."
-    context_iq = "\n\n".join(
-        f"[{i + 1}] {r.title}\n{r.snippet}" for i, r in enumerate(iq_results)
-    ) or "No IQ corpus results available."
-    focus = ", ".join(req.focus_areas) if req.focus_areas else "general IQ stack"
-
-    system_prompt = (
-        "You are a Microsoft Azure IQ specialist preparing a customer research brief. "
-        "Synthesise the provided web research and IQ corpus context into a structured "
-        "opportunity assessment. Be specific about IQ layers (Work IQ, Fabric IQ, "
-        "Foundry IQ) and relevant Azure services. Output valid JSON matching this schema:\n"
-        '{"summary": "...", "iq_opportunities": [{"layer": "...", "title": "...", '
-        '"description": "...", "services": ["..."], "priority": "high|medium|low"}], '
-        '"recommended_approach": "..."}'
-    )
-
-    user_prompt = (
-        f"## Company: {req.company}\n"
-        f"## Industry: {req.industry or 'Not specified'}\n"
-        f"## Focus Areas: {focus}\n\n"
-        f"## Web Research\n{context_web}\n\n"
-        f"## IQ Corpus Context\n{context_iq}\n\n"
-        "Generate a structured IQ opportunity assessment. "
-        "Return ONLY the JSON object, no markdown fences."
-    )
-
-    raw_answer, tokens = await _call_openai(system_prompt, user_prompt)
-
-    # 4 — Parse LLM response (graceful fallback)
-    summary = raw_answer
+    summary: str | None = None
     opportunities: list[IQOpportunity] = []
     recommended_approach = "Engage IQ specialist for detailed discovery."
+    all_citations: list[Citation] = []
+    tokens: int = 0
 
-    try:
-        import json
-        parsed = json.loads(raw_answer)
-        summary = parsed.get("summary", raw_answer)
-        recommended_approach = parsed.get("recommended_approach", recommended_approach)
-        for opp in parsed.get("iq_opportunities", []):
-            opportunities.append(
-                IQOpportunity(
-                    layer=opp.get("layer", "foundry-iq"),
-                    title=opp.get("title", ""),
-                    description=opp.get("description", ""),
-                    services=opp.get("services", []),
-                    priority=opp.get("priority", "medium"),
-                )
+    if workflow is not None:
+        focus = ", ".join(req.focus_areas) if req.focus_areas else "general IQ stack"
+        research_prompt = (
+            f"Research the following customer and generate a structured IQ opportunity assessment.\n"
+            f"Company: {req.company}\n"
+            f"Industry: {req.industry or 'Not specified'}\n"
+            f"Focus areas: {focus}\n\n"
+            "Produce a JSON response with keys: summary, iq_opportunities "
+            "(each with layer, title, description, services, priority), recommended_approach."
+        )
+        logger.debug("Running customer-outcome workflow for company '%s'", req.company)
+        raw_answer, tokens = await _run_agent_loop(workflow, research_prompt)
+
+        if raw_answer is not None:
+            summary, opportunities, recommended_approach = _parse_research_json(
+                raw_answer, fallback_summary=raw_answer
             )
-    except (json.JSONDecodeError, KeyError, TypeError) as exc:
-        logger.warning("Could not parse LLM JSON response for research: %s", exc)
+
+    # 2 — Fall back to direct implementation when workflow is unavailable or failed.
+    if summary is None:
+        logger.debug("customer-outcome workflow unavailable — using direct RAG fallback")
+
+        # Bing search: company context
+        bing_query = f"{req.company} Azure AI analytics cloud strategy"
+        if req.industry:
+            bing_query += f" {req.industry}"
+        web_citations = await _bing_search(bing_query, count=5)
+
+        # AI Search: IQ opportunity context
+        iq_query = f"IQ opportunities {req.industry or 'enterprise'} {' '.join(req.focus_areas or [])}"
+        iq_results = await _search_index(iq_query, top=settings.search_top_k)
+        iq_citations = _results_to_citations(iq_results)
+        all_citations = web_citations + iq_citations
+
+        context_web = "\n".join(
+            f"- {c.title}: {c.snippet}" for c in web_citations
+        ) or "No web results available."
+        context_iq = "\n\n".join(
+            f"[{i + 1}] {r.title}\n{r.snippet}" for i, r in enumerate(iq_results)
+        ) or "No IQ corpus results available."
+        focus = ", ".join(req.focus_areas) if req.focus_areas else "general IQ stack"
+
+        system_prompt = (
+            "You are a Microsoft Azure IQ specialist preparing a customer research brief. "
+            "Synthesise the provided web research and IQ corpus context into a structured "
+            "opportunity assessment. Be specific about IQ layers (Work IQ, Fabric IQ, "
+            "Foundry IQ) and relevant Azure services. Output valid JSON matching this schema:\n"
+            '{"summary": "...", "iq_opportunities": [{"layer": "...", "title": "...", '
+            '"description": "...", "services": ["..."], "priority": "high|medium|low"}], '
+            '"recommended_approach": "..."}'
+        )
+
+        user_prompt = (
+            f"## Company: {req.company}\n"
+            f"## Industry: {req.industry or 'Not specified'}\n"
+            f"## Focus Areas: {focus}\n\n"
+            f"## Web Research\n{context_web}\n\n"
+            f"## IQ Corpus Context\n{context_iq}\n\n"
+            "Generate a structured IQ opportunity assessment. "
+            "Return ONLY the JSON object, no markdown fences."
+        )
+
+        raw_answer, tokens = await _call_openai(system_prompt, user_prompt)
+        summary, opportunities, recommended_approach = _parse_research_json(
+            raw_answer, fallback_summary=raw_answer
+        )
 
     latency_ms = int((time.monotonic() - t0) * 1000)
 
