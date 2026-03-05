@@ -16,7 +16,8 @@ Built on Azure with a dual-provider AI strategy:
 | Component | Service | Purpose |
 |---|---|---|
 | **Search** | Azure AI Search (Basic) | Hybrid vector + BM25 + semantic reranking |
-| **Chat/Reasoning** | GitHub Copilot SDK | $0/token via GitHub license; 6 domain skills |
+| **Agent Runtime** | Microsoft Agent Framework (RC) | Multi-agent orchestration, function tools, MCP, A2A |
+| **Chat/Reasoning** | Azure OpenAI via Foundry | GPT-4.1 reasoning, GPT-4o-mini routing |
 | **Embeddings** | Azure OpenAI | `text-embedding-3-large` (1536-dim) |
 | **Document Store** | Azure Cosmos DB (Serverless) | Corpus metadata, customer research, learning profiles |
 | **Cache** | Azure Cache for Redis | Query results, embedding cache, research L1 |
@@ -37,16 +38,22 @@ Multi-source ingestion with IQ-layer taxonomy tagging:
 
 All content tagged by: IQ layer, Azure services, capabilities, difficulty level, target role, GA status, certification relevance.
 
-## Copilot Skills
+## Specialist Agents
 
-| Skill | Purpose |
-|---|---|
-| `iq-architect` | Cross-layer IQ architecture Q&A |
-| `azure-navigator` | Azure service deep-dives with best practices |
-| `story-weaver` | Multi-source technical narrative composition |
-| `customer-researcher` | Live web research → customer outcome documents |
-| `latest-updates` | What changed this week in the IQ landscape |
-| `competitive-context` | Microsoft IQ vs. Databricks/AWS/GCP positioning |
+Built on Microsoft Agent Framework (RC) — successor to Semantic Kernel + AutoGen:
+
+| Agent | Purpose | Key Tools |
+|---|---|---|
+| `iq-architect` | Cross-layer IQ architecture Q&A | search_iq_corpus, get_service_details |
+| `azure-navigator` | Azure service deep-dives with best practices | search_iq_corpus, get_service_details |
+| `story-weaver` | Multi-source technical narrative composition | search_iq_corpus, get_latest_updates |
+| `customer-researcher` | Live web research → customer outcome documents | bing_search, generate_outcome_doc |
+| `latest-updates` | What changed this week in the IQ landscape | search_iq_corpus (filtered) |
+| `competitive-context` | Microsoft IQ vs. Databricks/AWS/GCP positioning | bing_search, search_iq_corpus |
+
+**Multi-agent workflows:**
+- **Customer Outcome:** researcher → architect → story weaver (sequential)
+- **Deep Dive:** architect + navigator (parallel) → story weaver
 
 ## Industry Focus
 
@@ -65,7 +72,7 @@ Pre-built IQ-to-pain-point mappings for:
 - [x] eLearning expert review (35 recommendations)
 - [x] Business strategy expert review (industry use cases, GTM alignment)
 - [x] Technical architecture expert review (48KB, resilience, RAG, cost model)
-- [ ] Phase 0: Validate Copilot SDK + provision Azure OpenAI
+- [ ] Phase 0: Validate Agent Framework RC + provision Azure OpenAI via Foundry
 - [ ] Phase 1: Knowledge foundation (Week 1)
 - [ ] Phase 2: Copilot SDK engine (Week 2)
 - [ ] Phase 3: Customer outcomes + production (Week 3)
@@ -83,7 +90,8 @@ Pre-built IQ-to-pain-point mappings for:
 
 - **Language:** Python 3.12+
 - **Framework:** FastAPI + Uvicorn
-- **AI:** GitHub Copilot SDK + Azure OpenAI
+- **Agent Framework:** Microsoft Agent Framework RC (`agent-framework`)
+- **AI:** Azure OpenAI via Foundry (GPT-4.1, text-embedding-3-large)
 - **Search:** Azure AI Search (hybrid vector + BM25 + semantic reranking)
 - **Storage:** Azure Cosmos DB (Serverless) + Azure Blob Storage
 - **Cache:** Azure Cache for Redis

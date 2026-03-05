@@ -3,11 +3,15 @@ fastapi>=0.110.0
 uvicorn>=0.27.0
 httpx>=0.27.0
 
-# AI
-github-copilot-sdk>=0.1.0
+# Microsoft Agent Framework (RC — successor to Semantic Kernel + AutoGen)
+agent-framework>=1.0.0rc1
+agent-framework-azure-ai>=1.0.0rc1
+agent-framework-orchestrations>=1.0.0rc1
+
+# Azure OpenAI (embeddings + chat via Foundry)
 openai>=1.12.0
 
-# Azure
+# Azure SDKs
 azure-search-documents>=11.6.0
 azure-cosmos>=4.7.0
 azure-storage-blob>=12.19.0
@@ -19,6 +23,7 @@ azure-servicebus>=7.12.0
 beautifulsoup4>=4.12.0
 tiktoken>=0.6.0
 youtube-transcript-api>=0.6.0
+feedparser>=6.0.0
 
 # Resilience
 tenacity>=8.2.0

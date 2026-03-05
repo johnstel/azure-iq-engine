@@ -145,33 +145,50 @@ The engine's knowledge domain is structured around Microsoft's three IQ layers a
 
 > **These ADRs address existential risks identified during expert review. They must be resolved before build begins.**
 
-### ADR-001: LLM Inference & Embedding Layer
+### ADR-001: Agent Platform — Microsoft Agent Framework on Azure AI Foundry
 
-**Status:** ACCEPTED — Dual-provider architecture required  
-**Context:** The Copilot SDK is an agent runtime (JSON-RPC over Copilot CLI). It provides chat/completion inference but **does NOT expose embedding APIs**. `text-embedding-3-large` is not available through the SDK.  
-**Decision:** Implement a `ModelClient` abstraction layer:
-- **Chat/Completion:** Copilot SDK (primary, $0/token via GitHub license) → Azure OpenAI (fallback)
-- **Embeddings:** Azure OpenAI directly (required, ~$0.13/1M tokens)
-- Circuit breaker pattern: if Copilot SDK fails 3× in 60s, auto-route to Azure OpenAI
+**Status:** ACCEPTED — Replaces Copilot SDK (v2.0) entirely  
+**Context:** Copilot SDK requires local CLI installation and is designed for developer workstations, not server-side deployments. Azure AI Foundry with Microsoft Agent Framework (RC, successor to Semantic Kernel + AutoGen) is the correct platform for a server-deployed agentic application.  
+**Decision:** Use **Microsoft Agent Framework** (`pip install agent-framework --pre`) with **Azure AI Foundry** as the AI backend:
+- **Agent runtime:** Agent Framework provides agent creation, function tools, multi-agent orchestration (sequential, concurrent, handoff, group chat), MCP support, streaming, checkpointing
+- **LLM inference:** Azure OpenAI via Foundry-provisioned endpoints (GPT-4.1 for reasoning, GPT-4o-mini for routing)
+- **Embeddings:** Azure OpenAI `text-embedding-3-large` (1536-dim)
+- **Auth:** `DefaultAzureCredential` (managed identity in production)
+- **Interop:** A2A (Agent-to-Agent), AG-UI, MCP (Model Context Protocol)
 
 ```python
-# src/engine/model_client.py
-class ModelClient(Protocol):
-    async def chat(self, messages: list[dict], model: str = "gpt-5") -> str: ...
-    async def embed(self, texts: list[str]) -> list[list[float]]: ...
+# src/engine/agents.py — Microsoft Agent Framework
+from agent_framework.azure import AzureOpenAIResponsesClient
+from azure.identity import DefaultAzureCredential
 
-class CopilotModelClient(ModelClient):
-    """Primary: $0/token via GitHub license. Chat only."""
-    
-class AzureOpenAIModelClient(ModelClient):
-    """Fallback for chat; primary for embeddings."""
+client = AzureOpenAIResponsesClient(
+    credential=DefaultAzureCredential(),
+    endpoint="https://<foundry-resource>.openai.azure.com/openai/v1"
+)
 
-class ResilientModelRouter(ModelClient):
-    """Circuit breaker wrapping both providers."""
+# IQ Architect agent — cross-layer reasoning
+iq_architect = client.as_agent(
+    name="iq-architect",
+    instructions="You are an expert on Microsoft IQ layers (Work IQ, Fabric IQ, Foundry IQ)...",
+    tools=[search_iq_corpus, get_azure_service_details, get_latest_updates],
+)
+
+# Customer Researcher agent — web research + outcome generation
+customer_researcher = client.as_agent(
+    name="customer-researcher",
+    instructions="You research customer companies and generate IQ outcome documents...",
+    tools=[bing_search, search_iq_corpus, generate_outcome_doc],
+)
+
+# Multi-agent workflow: research → architect → story weave
+from agent_framework.orchestrations import SequentialBuilder
+workflow = SequentialBuilder(
+    participants=[customer_researcher, iq_architect, story_weaver]
+).build()
 ```
 
-**Consequence:** Azure OpenAI resource required from day one for embeddings. Chat inference remains $0 when Copilot SDK is healthy. Fallback adds ~$30–100/month at expected usage.  
-**Risk if ignored:** 🔴 CRITICAL — Building on SDK alone will block at embedding generation; SDK preview outage blocks entire engine.
+**Consequence:** Full Azure-native deployment with managed identity auth. No local CLI dependency. Horizontal scaling via Container Apps. Server-side multi-agent orchestration with built-in patterns. Cost: Azure OpenAI token usage (~$20-65/month at expected volume).  
+**Risk if ignored:** N/A — this replaces the Copilot SDK risk entirely.
 
 ### ADR-002: Ingestion Pipeline Robustness
 
@@ -354,54 +371,100 @@ Agentic RAG, GraphRAG, retrieval augmented generation => rag
 - **Dead letter queue:** Failed items land in DLQ for inspection and retry
 - **Basic tier:** ~$0.05/million operations — effectively free at this scale
 
-### 5.3 Query & Story Engine — GitHub Copilot SDK
+### 6.3 Query & Story Engine — Microsoft Agent Framework on Azure AI Foundry
 
-#### 6.3.1 Copilot SDK Session (Chat) + Azure OpenAI (Embeddings)
+#### 6.3.1 Agent Setup (Azure AI Foundry + Agent Framework)
 
 ```python
-# Chat inference — Copilot SDK ($0/token via GitHub license)
-from copilot import CopilotClient
+# Agent runtime — Microsoft Agent Framework (RC)
+# pip install agent-framework --pre
+from agent_framework.azure import AzureOpenAIResponsesClient
+from agent_framework.orchestrations import SequentialBuilder, ConcurrentBuilder
+from azure.identity import DefaultAzureCredential
 
-client = CopilotClient()
-await client.start()
+# Foundry-provisioned Azure OpenAI endpoint
+client = AzureOpenAIResponsesClient(
+    credential=DefaultAzureCredential(),
+    endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),  # From Key Vault
+)
 
-session = await client.create_session({
-    "model": "gpt-5",
-    "streaming": True,
-    "skill_directories": [
-        "./skills/iq-architect/SKILL.md",
-        "./skills/azure-navigator/SKILL.md",
-        "./skills/story-weaver/SKILL.md",
-        "./skills/customer-researcher/SKILL.md",
-        "./skills/latest-updates/SKILL.md",
-        "./skills/competitive-context/SKILL.md",  # NEW v3.0
+# --- Specialist Agents ---
+
+iq_architect = client.as_agent(
+    name="iq-architect",
+    instructions="""You are an expert on Microsoft's IQ layers (Work IQ, Fabric IQ, Foundry IQ).
+    Answer questions that span the full IQ stack with grounded, cited responses.
+    Always identify which IQ layer(s) apply and which Azure services are involved.""",
+    tools=[search_iq_corpus, get_service_details, get_latest_updates],
+)
+
+azure_navigator = client.as_agent(
+    name="azure-navigator",
+    instructions="""You are an Azure service expert. Provide deep-dive guidance on
+    specific Azure services, best practices, pricing, and Well-Architected patterns.""",
+    tools=[search_iq_corpus, get_service_details],
+)
+
+story_weaver = client.as_agent(
+    name="story-weaver",
+    instructions="""You compose multi-source technical narratives that weave together
+    IQ layers, Azure services, and real-world scenarios into compelling stories.""",
+    tools=[search_iq_corpus, get_latest_updates],
+)
+
+customer_researcher = client.as_agent(
+    name="customer-researcher",
+    instructions="""You research customer companies via web search and generate
+    IQ outcome documents with TCO/ROI modeling and competitive positioning.""",
+    tools=[bing_web_search, search_iq_corpus, generate_outcome_doc],
+)
+
+latest_updates = client.as_agent(
+    name="latest-updates",
+    instructions="""You track what changed this week in the Microsoft IQ landscape.
+    Surface GA announcements, preview features, deprecations, and pricing changes.""",
+    tools=[search_iq_corpus],  # Filtered to azure-update source_type, last 7 days
+)
+
+competitive_context = client.as_agent(
+    name="competitive-context",
+    instructions="""You analyze Microsoft IQ capabilities vs. competing platforms
+    (Databricks, AWS Bedrock, GCP Vertex, Snowflake, Salesforce Einstein).""",
+    tools=[bing_web_search, search_iq_corpus],
+)
+
+# --- Multi-Agent Workflows ---
+
+# Customer outcome: research → architect → story weave (sequential)
+customer_outcome_workflow = SequentialBuilder(
+    participants=[customer_researcher, iq_architect, story_weaver]
+).build()
+
+# Deep dive: architect + navigator in parallel, then story weave
+deep_dive_workflow = SequentialBuilder(
+    participants=[
+        ConcurrentBuilder(participants=[iq_architect, azure_navigator]).build(),
+        story_weaver,
     ]
-})
+).build()
 
-# Embedding generation — Azure OpenAI directly (SDK does NOT support embeddings)
+# Embedding generation — Azure OpenAI directly
 from openai import AsyncAzureOpenAI
 embed_client = AsyncAzureOpenAI(
     azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
-    api_key=os.getenv("AZURE_OPENAI_KEY"),  # From Key Vault
+    azure_ad_token_provider=DefaultAzureCredential(),
     api_version="2024-06-01"
 )
-# Parallel embedding with semaphore (20 concurrent)
-async def embed_batch(chunks: list[str]) -> list[list[float]]:
-    sem = asyncio.Semaphore(20)
-    async def embed_one(text):
-        async with sem:
-            resp = await embed_client.embeddings.create(
-                input=text, model="text-embedding-3-large"
-            )
-            return resp.data[0].embedding
-    return await asyncio.gather(*[embed_one(c) for c in chunks])
 ```
 
-**Why this dual architecture (ADR-001):**
-- Copilot SDK: $0/token chat via GitHub license, built-in skill system, session management, MCP tools
-- Azure OpenAI: Required for embeddings (SDK doesn't expose embedding API), serves as chat fallback
-- `ResilientModelRouter` wraps both with circuit breaker — SDK failure auto-routes to Azure OpenAI
-- MCP server integration — Azure AI Search, Bing Search, GitHub API as tools
+**Why Microsoft Agent Framework on Foundry (ADR-001):**
+- **Server-native:** Designed for cloud deployment, not local workstations. Scales horizontally in Container Apps.
+- **Multi-agent orchestration:** Sequential, concurrent, handoff, and group chat patterns built-in with streaming.
+- **Azure-native auth:** `DefaultAzureCredential` / managed identity — no PATs, no CLI processes.
+- **MCP support:** Azure AI Search, Bing, GitHub as MCP tool servers.
+- **A2A interop:** Agent-to-Agent protocol for future multi-service agent communication.
+- **Successor to Semantic Kernel + AutoGen:** Production path to GA, Microsoft's strategic agent framework.
+- **Multi-provider:** Azure OpenAI primary, but can swap to OpenAI, Anthropic, Bedrock if needed.
 - Same production execution loop as Copilot CLI
 
 #### 5.3.2 Copilot Skills — Five Domain Skills
@@ -589,13 +652,12 @@ reference architecture from Azure Architecture Center if applicable.]
 |---|---|---|---|
 | Azure AI Search | **Basic** (upgrade to S1 at 80% capacity) | Vector + hybrid search for knowledge corpus | ~$75 |
 | Azure Cosmos DB | Serverless | Document store, customer research cache, query logs | ~$40-80 |
-| Azure OpenAI | Standard S0 | Embedding generation (`text-embedding-3-large`) + chat fallback | ~$15-50 |
+| Azure OpenAI | Standard S0 | Chat (GPT-4.1) + embeddings (`text-embedding-3-large`) via Foundry | ~$35-85 |
 | Azure Container Apps | Consumption | Python app runtime (API + ingestion workers) | ~$35-65 |
 | Azure Cache for Redis | Basic C1 (1 GB) | Query result cache, embedding cache | ~$16 |
-| Azure Key Vault | Standard | API keys, secrets (YouTube, Bing, GitHub PAT) | ~$1 |
+| Azure Key Vault | Standard | Secrets (YouTube, Bing API keys) | ~$1 |
 | Azure Blob Storage | Hot | Raw ingested content, cached responses, generated docs | ~$8-15 |
 | Azure Service Bus | Basic | Dead letter queue for ingestion pipeline | ~$1 |
-| GitHub Copilot SDK | Enterprise license | LLM chat inference ($0/token) | $0 |
 | YouTube Data API | Free tier | 10,000 units/day | $0 |
 | Bing Web Search API | S1 | Customer research (1K–10K queries/month) | ~$7-25 |
 | Log Analytics + App Insights | Pay-per-GB | Observability, distributed tracing, RAG metrics | ~$20-35 |
@@ -611,7 +673,7 @@ reference architecture from Azure Architecture Center if applicable.]
 rg-iq-engine-dev
 ├── srch-iq-engine-dev          (Azure AI Search — Basic, upgrade to S1 at 80%)
 ├── cosmos-iq-engine-dev        (Cosmos DB — Serverless)
-├── oai-iq-engine-dev           (Azure OpenAI — embeddings + chat fallback)
+├── oai-iq-engine-dev           (Azure OpenAI — chat + embeddings via Foundry)
 ├── ca-iq-engine-dev            (Container App — API)
 ├── ca-iq-ingest-dev            (Container App — ingestion workers)
 ├── redis-iq-engine-dev         (Azure Cache for Redis — Basic C1)
@@ -625,8 +687,8 @@ rg-iq-engine-dev
 ### 7.3 Identity & Security
 
 - **Managed Identity** on both Container Apps → accesses AI Search, Cosmos DB, Key Vault, Blob Storage, Azure OpenAI, Redis, Service Bus
-- **No secrets in code** — YouTube API key, Bing API key, GitHub PAT all in Key Vault
-- **GitHub Copilot auth** via `COPILOT_GITHUB_TOKEN` (PAT with `copilot` scope, stored in Key Vault, **90-day rotation policy**)
+- **No secrets in code** — YouTube API key, Bing API key all in Key Vault
+- **Azure AI Foundry auth** via `DefaultAzureCredential` (managed identity in production, Azure CLI in dev)
 - **Network:** VNET with private endpoints to AI Search + Cosmos DB + Azure OpenAI (production)
 - **Data classification:** All ingested content is public-domain (MS Learn, blogs, YouTube) — no PII or customer-sensitive data in the corpus itself. Customer research results cached with 90-day TTL.
 - **Customer research RBAC:** Row-level partition isolation per customer engagement; only owning user retrieves their research cache
@@ -640,20 +702,23 @@ rg-iq-engine-dev
 | Layer | Technology |
 |---|---|
 | Language | Python 3.12+ |
-| LLM Orchestration | `github-copilot-sdk` (PyPI) |
-| Skills Engine | Copilot Skills (`.copilot_skills/` directory) |
+| Agent Framework | Microsoft Agent Framework RC (`agent-framework`, PyPI) |
+| LLM Provider | Azure OpenAI via Foundry (GPT-4.1, GPT-4o-mini) |
+| Embeddings | Azure OpenAI `text-embedding-3-large` (1536-dim) |
+| Multi-Agent Orchestration | Agent Framework workflows (sequential, concurrent, handoff) |
+| Tool Protocol | MCP (Model Context Protocol) + native function tools |
+| Agent Interop | A2A (Agent-to-Agent), AG-UI |
 | Vector + Hybrid Search | Azure AI Search (semantic reranking) |
 | Document Store | Azure Cosmos DB (serverless NoSQL) |
 | Transcript Extraction | `youtube-transcript-api` + YouTube Data API v3 |
 | Web Scraping | `httpx` + `beautifulsoup4` (MS Learn, Tech Community) |
 | RSS Parsing | `feedparser` (Azure Updates, blog feeds) |
-| Embeddings | `text-embedding-3-large` (via Copilot SDK or Azure OpenAI) |
 | Web Research | Bing Web Search API (MCP tool for customer research) |
 | API Framework | FastAPI |
 | Containerization | Docker → Azure Container Apps |
 | IaC | Terraform |
 | CI/CD | GitHub Actions |
-| Observability | Azure Monitor + Application Insights |
+| Observability | Azure Monitor + Application Insights + OpenTelemetry |
 
 ---
 
@@ -724,8 +789,8 @@ azure-iq-engine/
 |---|---|
 | **IQ layers as organizing principle** | Taxonomy structured around Work IQ / Fabric IQ / Foundry IQ + Azure services — survives branding evolution |
 | **Multi-source corpus** | Official docs, blogs, video transcripts, update feeds — no single source dominates |
-| **Copilot SDK for chat + Azure OpenAI for embeddings** | SDK provides $0/token chat via GitHub license; embeddings require direct Azure OpenAI (ADR-001) |
-| **ModelClient abstraction** | Decouples business logic from SDK preview risk; Azure OpenAI failover automatic |
+| **Microsoft Agent Framework on Foundry** | Server-native agent runtime (successor to SK + AutoGen); multi-agent orchestration, MCP, A2A, managed identity auth (ADR-001) |
+| **Azure OpenAI for all inference** | Chat (GPT-4.1) + embeddings (text-embedding-3-large) via Foundry endpoints; ~$20-65/month |
 | **AI Search Basic tier (not S1)** | Saves $175/month in Phase 1; upgrade trigger at 80% capacity (ADR-004) |
 | **Content-type-aware chunking** | Different content types need different strategies (ADR-003) |
 | **SHA256 fingerprinting + content diffing** | Prevents corpus corruption on re-crawl; saves 70-90% embedding cost (ADR-002) |
@@ -740,8 +805,8 @@ azure-iq-engine/
 
 | Risk | Impact | Mitigation |
 |---|---|---|
-| **Copilot SDK is technical preview** | 🔴 Critical | ModelClient abstraction + Azure OpenAI fallback (ADR-001). Pin SDK version. |
-| **SDK doesn't support embeddings** | 🔴 Critical | Azure OpenAI resource required from day one for `text-embedding-3-large` |
+| **Agent Framework is Release Candidate** | 🟡 Medium | RC API surface is stable; GA expected weeks away. Pin version. Framework is Microsoft's strategic path (replaces SK + AutoGen). |
+| **Azure OpenAI token costs** | 🟡 Medium | GPT-4.1 at ~$2/1M input tokens; at 1K queries/day ≈ $20-65/month. Redis cache reduces 30-40% of LLM calls. |
 | **Ingestion corpus corruption** | 🔴 Critical | SHA256 fingerprinting + checkpoint/resume + content diffing (ADR-002) |
 | **Poor retrieval quality from uniform chunking** | 🟠 High | ContentTypeAwareChunker with per-source strategies (ADR-003) |
 | MS Learn content changes frequently | 🟡 Medium | Weekly re-crawl with diffing; `latest-updates` skill; content confidence scoring |
@@ -780,7 +845,7 @@ Three external dependencies require circuit breakers (using `tenacity`):
 
 | Dependency | Max Attempts | Backoff | Timeout | Fallback |
 |---|---|---|---|---|
-| Copilot SDK (chat) | 3 | Exponential 2–10s | 30s | Azure OpenAI chat |
+| Azure OpenAI (chat) | 3 | Exponential 2–10s | 30s | Cached response → "service temporarily limited" |
 | Azure OpenAI (embeddings) | 5 | Exponential 2–60s | 120s | Fail with retry notice |
 | Azure AI Search (query) | 3 | Fixed 1s | 10s | Redis cached results → static baseline |
 | Azure AI Search (index write) | 5 | Exponential 1–30s | 60s | DLQ via Service Bus |
@@ -792,7 +857,7 @@ Three external dependencies require circuit breakers (using `tenacity`):
 Container Apps probes on the FastAPI app:
 
 - **`/health/live`** — process alive (always 200)
-- **`/health/ready`** — validates AI Search connectivity, Cosmos DB connectivity, Redis connectivity, Copilot SDK session availability
+- **`/health/ready`** — validates AI Search connectivity, Cosmos DB connectivity, Redis connectivity, Azure OpenAI availability
 - **`/health/started`** — startup probe with 30-attempt threshold
 
 ### 14.3 Graceful Degradation
@@ -1014,8 +1079,8 @@ Per-service cost dashboard: AI Search, Cosmos DB, Container Apps, OpenAI, Redis.
 ## 18. Revised Implementation Roadmap (v3.0)
 
 ### Phase 0 — Validation (Before Build — Day 0)
-- [ ] **Validate embedding availability:** Confirm `text-embedding-3-large` NOT available via Copilot SDK; provision Azure OpenAI resource
-- [ ] **Implement ModelClient abstraction:** `CopilotModelClient` + `AzureOpenAIModelClient` + `ResilientModelRouter`
+- [ ] **Provision Azure OpenAI** via Foundry with GPT-4.1 + text-embedding-3-large deployments
+- [ ] **Validate Agent Framework RC:** `pip install agent-framework --pre` → create test agent with function tool
 - [ ] **Define retry policy matrix** for all I/O boundaries
 - [ ] **Provision AI Search Basic** (not S1 — save $175/month)
 
@@ -1032,17 +1097,17 @@ Per-service cost dashboard: AI Search, Cosmos DB, Container Apps, OpenAI, Redis.
 - [ ] Cosmos DB document storage + ingestion state machine
 - **Deliverable:** Searchable knowledge corpus with deduplication, content-type-aware chunking, and full observability
 
-### Phase 2 — Copilot SDK Engine (Week 2)
-- [ ] Install `github-copilot-sdk` + configure via Key Vault
-- [ ] Build 5 Copilot Skills + **competitive-context skill** (promoted from future extensions)
+### Phase 2 — Agent Framework Engine (Week 2)
+- [ ] Install `agent-framework --pre` + configure Azure OpenAI via Foundry endpoint
+- [ ] Build 6 specialist agents with function tools (iq-architect, azure-navigator, story-weaver, customer-researcher, latest-updates, competitive-context)
 - [ ] Wire Azure AI Search as MCP tool with **scoring profiles**
+- [ ] Build multi-agent workflows: customer outcome (sequential), deep dive (parallel → weave)
 - [ ] Implement query router with IQ-layer-aware intent detection + **role-based filtering**
-- [ ] Build story-weaver with **role-aware narrative framing**
 - [ ] **Redis caching** — query results (TTL=1hr), embedding cache (TTL=7d)
-- [ ] **Circuit breaker** for Copilot SDK with Azure OpenAI failover
+- [ ] **Circuit breaker** on Azure OpenAI calls (tenacity)
 - [ ] CLI interface for testing queries
 - [ ] **Content confidence scoring** in every response
-- **Deliverable:** Working Q&A + story engine with role-aware responses, confidence scoring, caching, and resilient inference
+- **Deliverable:** Working multi-agent Q&A + story engine with role-aware responses, confidence scoring, caching, and orchestrated workflows
 
 ### Phase 3 — Customer Outcomes + Production (Week 3)
 - [ ] Build customer research pipeline (Bing API)
