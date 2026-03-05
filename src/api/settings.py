@@ -83,6 +83,16 @@ class Settings(BaseSettings):
         description="Max /api/research requests per minute per IP",
     )
 
+    # ── Observability ────────────────────────────────────────────────────────
+    applicationinsights_connection_string: str = Field(
+        default="",
+        description=(
+            "Azure Application Insights connection string "
+            "(APPLICATIONINSIGHTS_CONNECTION_STRING). "
+            "When empty, telemetry is tracked in-process but not exported."
+        ),
+    )
+
     # ── CORS ─────────────────────────────────────────────────────────────────
     cors_origins: list[str] = Field(
         default=["*"],

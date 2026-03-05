@@ -52,6 +52,30 @@ resource "azurerm_application_insights" "appi" {
 }
 
 ###############################################################################
+# Application Insights Availability Test — ping /health every 5 minutes
+###############################################################################
+resource "azurerm_application_insights_standard_web_test" "health_ping" {
+  name                    = "avt-${var.project_name}-${var.environment}-health"
+  resource_group_name     = azurerm_resource_group.rg.name
+  location                = azurerm_resource_group.rg.location
+  application_insights_id = azurerm_application_insights.appi.id
+  geo_locations           = ["us-tx-sn1-azr", "us-il-ch1-azr", "us-va-ash-azr"]
+  enabled                 = true
+  frequency               = 300  # seconds (every 5 minutes)
+  timeout                 = 30   # seconds
+
+  request {
+    url = "https://${azurerm_container_app.app.ingress[0].fqdn}/health"
+  }
+
+  validation_rules {
+    expected_status_code = 200
+  }
+
+  tags = local.tags
+}
+
+###############################################################################
 # Azure AI Search — Basic tier
 ###############################################################################
 resource "azurerm_search_service" "search" {

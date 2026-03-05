@@ -33,6 +33,11 @@ output "app_insights_connection_string" {
   sensitive   = true
 }
 
+output "app_insights_availability_test_name" {
+  description = "Name of the Application Insights availability test for the /health endpoint."
+  value       = azurerm_application_insights_standard_web_test.health_ping.name
+}
+
 output "service_bus_namespace_endpoint" {
   description = "Service Bus namespace endpoint."
   value       = "${azurerm_servicebus_namespace.sb.name}.servicebus.windows.net"

@@ -2,6 +2,18 @@
 
 All notable changes to Azure IQ Engine will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- **Observability:** Application Insights + structured OpenTelemetry integration
+  - `src/api/telemetry.py` — OpenTelemetry tracing and metrics module wired to Azure Monitor exporter
+  - Custom metrics: `iq_engine.query.latency_ms`, `iq_engine.llm.tokens_used`, `iq_engine.cache.hits/misses`, `iq_engine.ingestion.documents/chunks`, `iq_engine.errors`
+  - `APPLICATIONINSIGHTS_CONNECTION_STRING` env var (optional — degrades gracefully when absent)
+  - Query latency and LLM token usage recorded per request in `/api/query` and `/api/research`
+  - Error counters incremented on AI Search and LLM failures
+  - Ingestion stats (documents + chunks) recorded after each pipeline run
+- **Infrastructure:** Application Insights availability test pinging `/health` every 5 minutes from 3 Azure regions (`azurerm_application_insights_standard_web_test`)
+
 ## [0.1.0] - 2026-03-04
 
 ### Added

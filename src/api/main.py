@@ -49,6 +49,14 @@ from .models import (
 from .rate_limit import RateLimitMiddleware, RateLimitRule
 from .router_query import list_agents, route_question
 from .settings import get_settings
+from .telemetry import (
+    configure_telemetry,
+    record_error,
+    record_ingestion_stats,
+    record_llm_tokens,
+    record_query_latency,
+    shutdown_telemetry,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +76,13 @@ async def lifespan(app: FastAPI):
         bool(settings.foundry_base_url),
         bool(settings.search_endpoint),
     )
+    configure_telemetry(
+        service_name=settings.app_name,
+        service_version=settings.app_version,
+        connection_string=settings.applicationinsights_connection_string,
+    )
     yield
+    shutdown_telemetry()
     logger.info("Azure IQ Engine shutting down.")
 
 
@@ -175,6 +189,7 @@ async def _search_index(
             data = resp.json()
     except httpx.HTTPError as exc:
         logger.error("AI Search request failed: %s", exc)
+        record_error("/api/search", error_type="SearchUnavailable")
         raise HTTPException(status_code=502, detail="Search service unavailable")
 
     results: list[SearchResult] = []
@@ -262,6 +277,7 @@ async def _call_openai(
             data = resp.json()
     except httpx.HTTPError as exc:
         logger.error("OpenAI request failed: %s", exc)
+        record_error("/api/query", error_type="LLMUnavailable")
         raise HTTPException(status_code=502, detail="LLM service unavailable")
 
     answer = data["choices"][0]["message"]["content"]
@@ -381,12 +397,18 @@ async def _run_ingestion(job_id: str, req: IngestRunRequest) -> None:
         job.status = "completed"
         job.completed_at = datetime.now(timezone.utc)
         logger.info("Ingestion job %s completed", job_id)
+        record_ingestion_stats(
+            documents=job.documents_processed,
+            chunks=job.chunks_indexed,
+            source=",".join(req.sources) if req.sources else "all",
+        )
 
     except Exception as exc:  # noqa: BLE001
         job.status = "failed"
         job.errors.append(str(exc))
         job.completed_at = datetime.now(timezone.utc)
         logger.exception("Ingestion job %s failed", job_id)
+        record_error("/api/ingest/run", error_type=type(exc).__name__)
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
@@ -460,6 +482,9 @@ async def query_endpoint(req: QueryRequest, request: Request) -> QueryResponse:
     ) if citations else 0.4
 
     latency_ms = int((time.monotonic() - t0) * 1000)
+
+    record_query_latency(latency_ms, agent)
+    record_llm_tokens(tokens, agent)
 
     return QueryResponse(
         answer=answer,
@@ -553,6 +578,8 @@ async def research_endpoint(req: ResearchRequest) -> ResearchResponse:
         logger.warning("Could not parse LLM JSON response for research: %s", exc)
 
     latency_ms = int((time.monotonic() - t0) * 1000)
+
+    record_llm_tokens(tokens, "customer-researcher")
 
     return ResearchResponse(
         company=req.company,
