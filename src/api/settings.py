@@ -95,6 +95,36 @@ class Settings(BaseSettings):
         description="Recognised IQ layer identifiers",
     )
 
+    # ── Redis Cache ──────────────────────────────────────────────────────────
+    redis_url: str = Field(
+        default="",
+        description=(
+            "Redis connection URL for query caching (REDIS_URL). "
+            "Example: redis://localhost:6379/0 "
+            "Leave empty to disable caching."
+        ),
+    )
+
+    # ── Azure Application Insights / OpenTelemetry ───────────────────────────
+    applicationinsights_connection_string: str = Field(
+        default="",
+        description=(
+            "Azure Application Insights connection string "
+            "(APPLICATIONINSIGHTS_CONNECTION_STRING). "
+            "Leave empty to disable telemetry."
+        ),
+    )
+
+    # ── Admin ────────────────────────────────────────────────────────────────
+    admin_api_key: str = Field(
+        default="",
+        description=(
+            "Optional static API key protecting admin endpoints such as "
+            "POST /api/cache/invalidate (ADMIN_API_KEY). "
+            "Leave empty to allow unauthenticated access (dev only)."
+        ),
+    )
+
     # ── Content sources ──────────────────────────────────────────────────────
     content_sources: list[str] = Field(
         default=[

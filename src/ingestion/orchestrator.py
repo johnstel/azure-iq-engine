@@ -31,31 +31,20 @@ from typing import Any
 # ---------------------------------------------------------------------------
 from src.ingestion.chunker import ContentTypeAwareChunker, SourceType
 
-# Crawlers — MSLearnCrawler may be None if implementation is pending
+# Crawlers
 from src.ingestion.crawlers import (
-    MSLearnCrawler,          # TODO: verify/adjust once MSLearn crawler is implemented
+    MSLearnCrawler,
+    CrawlerConfig as MSLearnCrawlerConfig,
     YouTubeCrawler,
     AzureUpdatesCrawler,
     TechCommunityCrawler,
 )
 
-# TODO: Implement EmbeddingPipeline in src/ingestion/embedder.py
-# Expected interface:
-#   pipeline = EmbeddingPipeline()
-#   results  = await pipeline.embed_batch(chunks: list[dict]) -> list[dict]
-#   Each returned dict gains: "embedding": list[float], "token_count": int
 try:
     from src.ingestion.embedder import EmbeddingPipeline  # type: ignore[import]
 except ImportError:
     EmbeddingPipeline = None  # type: ignore[assignment,misc]
 
-# TODO: Implement SearchIndexer in src/ingestion/indexer.py
-# Expected interface:
-#   indexer = SearchIndexer()
-#   fps     = await indexer.get_existing_fingerprints() -> dict[str, str]
-#   result  = await indexer.index_batch(chunks: list[dict]) -> IndexResult
-#   count   = await indexer.get_index_document_count() -> int
-#   IndexResult must expose: .indexed int, .failed int
 try:
     from src.ingestion.indexer import SearchIndexer  # type: ignore[import]
 except ImportError:
@@ -88,7 +77,7 @@ class _SourceRoute:
 
 
 SOURCE_ROUTING: dict[str, _SourceRoute] = {
-    "mslearn":        _SourceRoute("ms-learn",          "content"),        # TODO: verify field once MSLearnCrawler lands
+    "mslearn":        _SourceRoute("ms-learn",          "content"),
     "youtube":        _SourceRoute("video-transcript",   "transcript_text"),
     "azure_updates":  _SourceRoute("azure-update",       "summary"),
     "techcommunity":  _SourceRoute("blog-post",          "body_text"),
@@ -346,15 +335,25 @@ class IngestionOrchestrator:
         if source == "mslearn":
             if MSLearnCrawler is None:
                 logger.warning(
-                    "MSLearnCrawler is not yet implemented — skipping 'mslearn' source."
+                    "MSLearnCrawler is not available — skipping 'mslearn' source."
                 )
                 return None
-            # TODO: Adjust MSLearnCrawler constructor kwargs once implementation lands.
-            #       Expected signature (TBD):
-            #         MSLearnCrawler(checkpoint_path=..., max_pages=..., force_recrawl=...)
-            return MSLearnCrawler(
-                checkpoint_path=checkpoint_dir / "mslearn_checkpoint.json",
+            # MSLearnCrawler uses CrawlerConfig and exposes crawl() → list[CrawledDocument].
+            # Wrap it to provide the crawl_all() → list[dict] interface used by the orchestrator.
+            ms_config = MSLearnCrawlerConfig(
+                checkpoint_path=str(checkpoint_dir / "mslearn_checkpoint.json"),
+                max_pages=max_pages if max_pages is not None else 2000,
             )
+            raw_crawler = MSLearnCrawler(ms_config)
+
+            class _MSLearnAdapter:
+                """Thin adapter: exposes crawl_all() and normalises output to list[dict]."""
+
+                async def crawl_all(self) -> list[dict[str, Any]]:
+                    docs = await raw_crawler.crawl()
+                    return [d.to_index_dict() for d in docs]
+
+            return _MSLearnAdapter()
 
         # Should never reach here — validated in __init__
         raise ValueError(f"No crawler registered for source '{source}'")
@@ -478,19 +477,15 @@ class IngestionOrchestrator:
                 len(chunks),
             )
         else:
-            try:
-                # TODO: SearchIndexer.get_existing_fingerprints() should return
-                #       dict[fingerprint_hash → chunk_id] for all indexed chunks.
-                indexer = SearchIndexer()
-                existing_fps = await indexer.get_existing_fingerprints()
-                logger.info(
-                    "  🔍  Retrieved %d existing fingerprint(s) from AI Search.",
-                    len(existing_fps),
-                )
-            except Exception as exc:  # noqa: BLE001
-                msg = f"Deduplication fingerprint fetch failed: {exc}"
-                logger.warning("  ⚠️  %s — treating all chunks as new.", msg)
-                self._result.errors.append(msg)
+            # SearchIndexer handles deduplication internally inside index_chunks()
+            # using per-document fingerprint comparison against the live index.
+            # The orchestrator does a lightweight in-memory pass here to skip
+            # chunks with duplicate fingerprints within the same run only.
+            logger.info(
+                "  🔍  Deduplication against live index is handled by SearchIndexer."
+                "  Performing in-run duplicate check on %d chunk(s).",
+                len(chunks),
+            )
 
         new_chunks: list[dict[str, Any]] = []
         skipped = 0
@@ -534,49 +529,33 @@ class IngestionOrchestrator:
             return chunks
 
         pipeline = EmbeddingPipeline()
-        embedded: list[dict[str, Any]] = []
-        total_tokens = 0
 
-        # TODO: Tune batch size based on EmbeddingPipeline rate limits /
-        #       token-per-minute quota for Azure OpenAI text-embedding-3-large.
-        #       100 chunks/batch is a conservative safe default.
-        BATCH_SIZE = 100  # noqa: N806
+        # EmbeddingPipeline.embed_chunks handles its own batching (16 inputs/call),
+        # concurrency limiting (semaphore), and retry/backoff internally.
+        # It mutates each chunk dict in-place, adding "embedding": list[float].
+        try:
+            embedded: list[dict[str, Any]] = await pipeline.embed_chunks(
+                chunks,
+                checkpoint_key="orchestrator",
+            )
+        except Exception as exc:  # noqa: BLE001
+            msg = f"EmbeddingPipeline.embed_chunks failed: {exc}"
+            logger.warning("  ❌  %s — chunks will be indexed without vectors.", msg)
+            self._result.errors.append(msg)
+            self._result.chunks_failed += len(chunks)
+            embedded = chunks  # pass through unembedded so indexing can still proceed
 
-        for batch_start in range(0, len(chunks), BATCH_SIZE):
-            if self._interrupted:
-                break
-            batch = chunks[batch_start : batch_start + BATCH_SIZE]
-            try:
-                # TODO: EmbeddingPipeline.embed_batch should accept list[dict] and
-                #       return list[dict], where each output dict is the input chunk
-                #       enriched with: "embedding": list[float], "token_count": int,
-                #       optionally "embedding_model": str.
-                result_batch: list[dict[str, Any]] = await pipeline.embed_batch(batch)
-                embedded.extend(result_batch)
-                batch_tokens = sum(r.get("token_count", 0) for r in result_batch)
-                total_tokens += batch_tokens
-                logger.debug(
-                    "  Embedded batch [%d–%d]  tokens=%d",
-                    batch_start,
-                    batch_start + len(batch) - 1,
-                    batch_tokens,
-                )
-            except Exception as exc:  # noqa: BLE001
-                msg = (
-                    f"Embedding failed for batch "
-                    f"[{batch_start}–{batch_start + len(batch) - 1}]: {exc}"
-                )
-                logger.warning("  ❌  %s", msg)
-                self._result.errors.append(msg)
-                self._result.chunks_failed += len(batch)
+        # Count chunks that received a valid embedding vector
+        success_count = sum(1 for c in embedded if c.get("embedding") is not None)
+        failed_count = len(embedded) - success_count
+        self._result.chunks_embedded = success_count
+        self._result.chunks_failed += failed_count
 
-        self._result.chunks_embedded = len(embedded)
-        self._result.embedding_tokens = total_tokens
-
-        # TODO: Pull actual cost-per-token from EmbeddingPipeline config once
-        #       the module is implemented.  Rate as of 2025-01 for
-        #       text-embedding-3-large: $0.00013 / 1K tokens.
+        # EmbeddingPipeline tracks token usage internally; we report what we can derive.
+        # Cost: $0.00013 / 1K tokens for text-embedding-3-large (Azure OpenAI pricing).
         COST_PER_1K_TOKENS = 0.00013  # noqa: N806
+        total_tokens = 0  # EmbeddingPipeline logs cost internally; token count not exposed here
+        self._result.embedding_tokens = total_tokens
         self._result.embedding_cost_usd = (total_tokens / 1_000) * COST_PER_1K_TOKENS
 
         logger.info("  ✅  Chunks embedded       : %d", self._result.chunks_embedded)
@@ -610,62 +589,24 @@ class IngestionOrchestrator:
 
         indexer = SearchIndexer()
 
-        # TODO: SearchIndexer.index_batch should accept list[dict] and return
-        #       an object with: .indexed int, .failed int.
-        #       Implement retry with exponential back-off for 429/503 responses.
-        #       AI Search accepts up to 1 000 documents per batch upload call;
-        #       500 is conservative to stay within request-size limits.
-        BATCH_SIZE = 500  # noqa: N806
-
-        total_indexed = 0
-        total_failed = 0
-
-        for batch_start in range(0, len(chunks), BATCH_SIZE):
-            if self._interrupted:
-                break
-            batch = chunks[batch_start : batch_start + BATCH_SIZE]
-            try:
-                index_result = await indexer.index_batch(batch)
-                total_indexed += index_result.indexed
-                total_failed += index_result.failed
-                if index_result.failed:
-                    msg = (
-                        f"Index batch [{batch_start}–{batch_start + len(batch) - 1}]: "
-                        f"{index_result.failed} document(s) failed."
-                    )
-                    logger.warning("  ⚠️  %s", msg)
-                    self._result.errors.append(msg)
-                logger.debug(
-                    "  Indexed batch [%d–%d]  ok=%d  fail=%d",
-                    batch_start,
-                    batch_start + len(batch) - 1,
-                    index_result.indexed,
-                    index_result.failed,
-                )
-            except Exception as exc:  # noqa: BLE001
-                msg = (
-                    f"Index batch [{batch_start}–{batch_start + len(batch) - 1}] "
-                    f"raised: {exc}"
-                )
-                logger.exception("  ❌  %s", msg)
-                self._result.errors.append(msg)
-                total_failed += len(batch)
-
-        self._result.chunks_indexed = total_indexed
-        self._result.chunks_failed += total_failed
-
-        # Best-effort: retrieve total index size post-upload
+        # SearchIndexer.index_chunks handles batching (500 docs/call), retry on partial
+        # failure, and deduplication via fingerprint comparison against the live index.
+        # It returns an IndexStats object with .indexed, .skipped_dedup, and .failed.
         try:
-            # TODO: Implement get_index_document_count() on SearchIndexer.
-            total_in_index: int = await indexer.get_index_document_count()
-            logger.info("  ✅  Chunks indexed this run : %d", total_indexed)
-            logger.info("  📊  Total docs in index now : %d", total_in_index)
-        except Exception:  # noqa: BLE001
-            logger.info("  ✅  Chunks indexed this run : %d", total_indexed)
-            logger.debug("  Could not retrieve total index doc count.", exc_info=True)
-
-        if total_failed:
-            logger.warning("  ❌  Chunks failed (index)  : %d", total_failed)
+            index_stats = await indexer.index_chunks(chunks)
+            self._result.chunks_indexed = index_stats.indexed
+            self._result.chunks_failed += index_stats.failed
+            if index_stats.failed:
+                msg = f"SearchIndexer reported {index_stats.failed} permanently failed document(s)."
+                logger.warning("  ⚠️  %s", msg)
+                self._result.errors.append(msg)
+            logger.info("  ✅  Chunks indexed this run : %d", index_stats.indexed)
+            logger.info("  ⏩  Chunks deduped by indexer: %d", index_stats.skipped_dedup)
+        except Exception as exc:  # noqa: BLE001
+            msg = f"SearchIndexer.index_chunks raised: {exc}"
+            logger.exception("  ❌  %s", msg)
+            self._result.errors.append(msg)
+            self._result.chunks_failed += len(chunks)
 
 
 # ---------------------------------------------------------------------------

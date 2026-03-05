@@ -6,12 +6,22 @@
 <title>Azure IQ Engine</title>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  /* ── Dark theme (default) ── */
   :root {
     --bg: #1e1e1e; --bg2: #252526; --bg3: #2d2d30; --bg4: #3c3c3c;
     --blue: #0078d4; --blue-hover: #106ebe; --blue-light: #1a9fff;
     --text: #e8e8e8; --text-dim: #a0a0a0; --text-muted: #6e6e6e;
     --border: #3c3c3c; --success: #107c10; --error: #d13438;
     --radius: 8px; --radius-lg: 12px;
+  }
+
+  /* ── Light theme ── */
+  [data-theme="light"] {
+    --bg: #f5f5f5; --bg2: #ffffff; --bg3: #ebebeb; --bg4: #d8d8d8;
+    --blue: #0078d4; --blue-hover: #106ebe; --blue-light: #005a9e;
+    --text: #1b1b1b; --text-dim: #4a4a4a; --text-muted: #767676;
+    --border: #cccccc; --success: #107c10; --error: #d13438;
   }
   html, body { height: 100%; background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; font-size: 14px; line-height: 1.5; }
 
@@ -23,7 +33,10 @@
   .header-logo { width: 32px; height: 32px; background: var(--blue); border-radius: 6px; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 14px; color: #fff; flex-shrink: 0; }
   .header-text h1 { font-size: 16px; font-weight: 600; color: #fff; }
   .header-text p { font-size: 11px; color: var(--text-dim); }
-  .version-badge { margin-left: auto; background: var(--bg3); color: var(--text-dim); padding: 3px 8px; border-radius: 20px; font-size: 11px; border: 1px solid var(--border); }
+  .version-badge { background: var(--bg3); color: var(--text-dim); padding: 3px 8px; border-radius: 20px; font-size: 11px; border: 1px solid var(--border); }
+  .header-actions { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+  .hdr-btn { background: var(--bg3); border: 1px solid var(--border); color: var(--text-dim); width: 30px; height: 30px; border-radius: 6px; font-size: 14px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all .15s; padding: 0; line-height: 1; }
+  .hdr-btn:hover { border-color: var(--blue); color: var(--blue-light); background: var(--bg4); }
 
   /* Tabs */
   .tabs { display: flex; background: var(--bg2); border-bottom: 1px solid var(--border); padding: 0 20px; flex-shrink: 0; }
@@ -159,6 +172,11 @@
       <p>Unified Knowledge for Work IQ · Fabric IQ · Foundry IQ</p>
     </div>
     <span class="version-badge">v0.1.0 MVP</span>
+    <div class="header-actions">
+      <button class="hdr-btn" id="clear-history-btn" title="Clear chat history">🗑️</button>
+      <button class="hdr-btn" id="export-md-btn" title="Export as Markdown">📥</button>
+      <button class="hdr-btn" id="theme-toggle-btn" title="Toggle light/dark theme">🌙</button>
+    </div>
   </header>
 
   <!-- Tabs -->
@@ -293,19 +311,114 @@ function escHtml(s) {
   return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
+// ─── Theme management ──────────────────────────────────────────────────────
+const THEME_KEY = 'iq-engine-theme';
+const HISTORY_KEY = 'iq-engine-chat-history';
+const MAX_HISTORY = 50;
+
+function applyTheme(theme) {
+  document.documentElement.setAttribute('data-theme', theme);
+  const btn = document.getElementById('theme-toggle-btn');
+  if (btn) btn.textContent = theme === 'light' ? '🌑' : '🌙';
+}
+
+function toggleTheme() {
+  const current = document.documentElement.getAttribute('data-theme') || 'dark';
+  const next = current === 'dark' ? 'light' : 'dark';
+  applyTheme(next);
+  localStorage.setItem(THEME_KEY, next);
+}
+
+// Load saved theme immediately (before paint)
+(function() {
+  const saved = localStorage.getItem(THEME_KEY);
+  if (saved) applyTheme(saved);
+})();
+
+// ─── Chat history persistence ──────────────────────────────────────────────
+// Each entry: { role: 'user'|'assistant', content: string, meta?: object, ts: number }
+let chatHistoryStore = [];
+
+function loadHistoryStore() {
+  try {
+    const raw = localStorage.getItem(HISTORY_KEY);
+    if (raw) chatHistoryStore = JSON.parse(raw);
+  } catch { chatHistoryStore = []; }
+}
+
+function saveHistoryStore() {
+  // Keep last MAX_HISTORY messages
+  if (chatHistoryStore.length > MAX_HISTORY) {
+    chatHistoryStore = chatHistoryStore.slice(-MAX_HISTORY);
+  }
+  try {
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(chatHistoryStore));
+  } catch { /* storage full — ignore */ }
+}
+
+function clearHistory() {
+  chatHistoryStore = [];
+  localStorage.removeItem(HISTORY_KEY);
+  // Remove all rendered messages except the empty-state
+  const ch = document.getElementById('chat-history');
+  ch.innerHTML = `<div class="empty-state" id="empty-state">
+    <div class="icon">🧠</div>
+    <p>Ask anything about Microsoft IQ — Work IQ, Fabric IQ, or Foundry IQ.</p>
+    <p style="font-size:12px;">Use quick actions above or type your question below.</p>
+  </div>`;
+}
+
+function exportAsMarkdown() {
+  if (!chatHistoryStore.length) { alert('No chat history to export.'); return; }
+  const lines = ['# Azure IQ Engine — Chat Export', `_Exported ${new Date().toLocaleString()}_`, ''];
+  for (const entry of chatHistoryStore) {
+    const label = entry.role === 'user' ? '**You**' : '**IQ Engine**';
+    lines.push(`${label}: ${entry.content}`);
+    lines.push('');
+  }
+  const blob = new Blob([lines.join('\n')], { type: 'text/markdown' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `iq-engine-chat-${Date.now()}.md`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+function restoreHistoryToDOM() {
+  if (!chatHistoryStore.length) return;
+  hideEmptyState();
+  for (const entry of chatHistoryStore) {
+    if (entry.role === 'user') {
+      _renderUserBubble(entry.content);
+    } else if (entry.role === 'assistant') {
+      _renderAssistantBubble(entry.data || { answer: entry.content }, entry.agent || null, entry.elapsed || '');
+    }
+  }
+}
+
 // ─── State ─────────────────────────────────────────────────────────────────
 let isLoading = false;
 let currentTab = 'ask';
 
 // ─── DOM refs ───────────────────────────────────────────────────────────────
 const chatHistory   = document.getElementById('chat-history');
-const emptyState    = document.getElementById('empty-state');
 const msgInput      = document.getElementById('msg-input');
 const sendBtn       = document.getElementById('send-btn');
 const agentSelect   = document.getElementById('agent-select');
 const askPanel      = document.getElementById('ask-panel');
 const researchPanel = document.getElementById('research-panel');
 const sourceStats   = document.getElementById('source-stats');
+
+// ─── Wire header buttons ────────────────────────────────────────────────────
+document.getElementById('theme-toggle-btn').addEventListener('click', toggleTheme);
+document.getElementById('clear-history-btn').addEventListener('click', () => {
+  if (confirm('Clear all chat history? This cannot be undone.')) clearHistory();
+});
+document.getElementById('export-md-btn').addEventListener('click', exportAsMarkdown);
+
+// ─── Init: load theme + history ─────────────────────────────────────────────
+loadHistoryStore();
+restoreHistoryToDOM();
 
 // ─── Tabs ───────────────────────────────────────────────────────────────────
 document.querySelectorAll('.tab').forEach(tab => {
@@ -361,7 +474,6 @@ async function sendMessage() {
   const text = msgInput.value.trim();
   if (!text || isLoading) return;
 
-  hideEmptyState();
   appendUserMessage(text);
   msgInput.value = '';
   autoResizeInput();
@@ -397,7 +509,8 @@ async function sendMessage() {
 }
 
 // ─── Append messages ────────────────────────────────────────────────────────
-function appendUserMessage(text) {
+
+function _renderUserBubble(text) {
   const div = document.createElement('div');
   div.className = 'msg user';
   div.innerHTML = `<div class="msg-bubble">${escHtml(text)}</div>`;
@@ -405,16 +518,16 @@ function appendUserMessage(text) {
   scrollBottom();
 }
 
-function appendAssistantMessage(data, agent, elapsed) {
+function _renderAssistantBubble(data, agent, elapsed) {
   const content = data.answer || data.response || data.content || JSON.stringify(data);
   const citations = data.citations || data.sources || [];
   const tokens = data.tokens_used || data.token_count || null;
-  const agentUsed = data.agent_used || data.agent || (agent !== 'auto' ? agent : null);
+  const agentUsed = data.agent_used || data.agent || (agent && agent !== 'auto' ? agent : null);
 
   const div = document.createElement('div');
   div.className = 'msg assistant';
 
-  let metaHtml = `<span>${elapsed}s</span>`;
+  let metaHtml = elapsed ? `<span>${elapsed}s</span>` : '';
   if (tokens) metaHtml += `<span>${tokens} tokens</span>`;
   if (agentUsed && agentUsed !== 'auto') metaHtml += `<span class="msg-agent-tag">${agentUsed.replace(/_/g,' ')}</span>`;
 
@@ -443,6 +556,20 @@ function appendAssistantMessage(data, agent, elapsed) {
     <div class="msg-meta">${metaHtml}</div>`;
   chatHistory.appendChild(div);
   scrollBottom();
+}
+
+function appendUserMessage(text) {
+  hideEmptyState();
+  _renderUserBubble(text);
+  chatHistoryStore.push({ role: 'user', content: text, ts: Date.now() });
+  saveHistoryStore();
+}
+
+function appendAssistantMessage(data, agent, elapsed) {
+  const content = data.answer || data.response || data.content || JSON.stringify(data);
+  _renderAssistantBubble(data, agent, elapsed);
+  chatHistoryStore.push({ role: 'assistant', content, data, agent, elapsed, ts: Date.now() });
+  saveHistoryStore();
 }
 
 function appendTyping() {
@@ -535,7 +662,8 @@ loadSourceStats();
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 function hideEmptyState() {
-  if (emptyState) emptyState.remove();
+  const es = document.getElementById('empty-state');
+  if (es) es.remove();
 }
 function setLoading(val) {
   isLoading = val;

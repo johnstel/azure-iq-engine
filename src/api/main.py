@@ -26,11 +26,20 @@ from datetime import datetime, timezone
 from typing import Any
 
 import httpx
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
+from .cache import (
+    TTL_LLM,
+    TTL_SEARCH,
+    get_cached,
+    invalidate_pattern,
+    make_cache_key,
+    set_cached,
+)
+from .telemetry import get_metrics, get_tracer, init_telemetry
 from .models import (
     HealthResponse,
     InfoResponse,
@@ -50,6 +59,12 @@ from .models import (
 from .rate_limit import RateLimitMiddleware, RateLimitRule
 from .router_query import list_agents, route_question
 from .settings import get_settings
+from pydantic import BaseModel as _BaseModel
+
+
+class CacheInvalidateRequest(_BaseModel):
+    """Body for POST /api/cache/invalidate."""
+    pattern: str = "*"  # glob pattern; defaults to clearing everything
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +84,9 @@ async def lifespan(app: FastAPI):
         bool(settings.foundry_base_url),
         bool(settings.search_endpoint),
     )
+
+    # Initialise Application Insights telemetry (no-op if env var absent)
+    init_telemetry(settings.applicationinsights_connection_string or None)
 
     # Initialise Agent Framework agents and multi-agent workflows.
     # Agents are stored in app.state so every request handler can access them
@@ -144,6 +162,18 @@ def create_app() -> FastAPI:
             ),
         ],
     )
+
+    @app.middleware("http")
+    async def _telemetry_middleware(request: Request, call_next):
+        """Attach a span to every inbound HTTP request for distributed tracing."""
+        tracer = get_tracer()
+        span_name = f"{request.method} {request.url.path}"
+        with tracer.start_as_current_span(span_name) as span:  # type: ignore[attr-defined]
+            span.set_attribute("http.method", request.method)  # type: ignore[attr-defined]
+            span.set_attribute("http.url", str(request.url))  # type: ignore[attr-defined]
+            response = await call_next(request)
+            span.set_attribute("http.status_code", response.status_code)  # type: ignore[attr-defined]
+        return response
 
     return app
 
@@ -497,6 +527,12 @@ async def _run_ingestion(job_id: str, req: IngestRunRequest) -> None:
         job.completed_at = datetime.now(timezone.utc)
         logger.info("Ingestion job %s completed", job_id)
 
+        # Record chunk telemetry
+        get_metrics().ingestion_chunks.add(  # type: ignore[attr-defined]
+            job.chunks_indexed or 0,
+            {"job_id": job_id},
+        )
+
     except Exception as exc:  # noqa: BLE001
         job.status = "failed"
         job.errors.append(str(exc))
@@ -540,8 +576,8 @@ async def info() -> InfoResponse:
 
 # ── Query ─────────────────────────────────────────────────────────────────────
 
-@app.post("/api/query", response_model=QueryResponse, tags=["Query"])
-async def query_endpoint(req: QueryRequest, request: Request) -> QueryResponse:
+@app.post("/api/query", tags=["Query"])
+async def query_endpoint(req: QueryRequest, request: Request) -> Response:
     """
     Main Q&A endpoint.
 
@@ -549,40 +585,64 @@ async def query_endpoint(req: QueryRequest, request: Request) -> QueryResponse:
     tool-calling loop handles search and reasoning internally. Falls back to a
     direct search → RAG path when the Agent Framework is unavailable (e.g. the
     agent-framework package is not installed or Foundry credentials are absent).
+
+    Responses are cached in Redis (TTL_SEARCH) and the X-Cache header indicates
+    HIT or MISS.
     """
     t0 = time.monotonic()
     settings = get_settings()
+    telemetry = get_metrics()
+    tracer = get_tracer()
 
     # 1 — Route to the appropriate specialist agent name.
     agent_name = route_question(req.question, preferred_agent=req.agent)
 
-    # 2 — Try Agent Framework tool-calling loop for the selected agent.
-    agents: dict[str, Any] = getattr(request.app.state, "agents", {})
-    agent = agents.get(agent_name)
-
-    answer: str | None = None
-    tokens: int = 0
-    results: list[SearchResult] = []
-
-    if agent is not None:
-        logger.debug("Routing question to Agent Framework agent '%s'", agent_name)
-        answer, tokens = await _run_agent_loop(agent, req.question)
-
-    # 3 — Fall back to direct RAG when the agent is unavailable or failed.
-    if answer is None:
-        logger.debug("Agent '%s' unavailable — using direct RAG fallback", agent_name)
-        results = await _search_index(
-            req.question,
-            top=req.top_k or settings.search_top_k,
-            iq_layer=req.iq_layers[0] if req.iq_layers else None,
+    # 2 — Cache lookup
+    cache_key = make_cache_key(
+        req.question,
+        agent=agent_name,
+        filters={"iq_layers": req.iq_layers, "top_k": req.top_k},
+    )
+    cached_payload = await get_cached(cache_key)
+    if cached_payload is not None:
+        telemetry.cache_hits.add(1, {"endpoint": "query"})  # type: ignore[attr-defined]
+        logger.debug("Cache HIT for query key %s", cache_key[:16])
+        return JSONResponse(
+            content=cached_payload,
+            headers={"X-Cache": "HIT"},
         )
-        system_prompt, user_prompt = _build_rag_prompt(req.question, results)
-        answer, tokens = await _call_openai(system_prompt, user_prompt)
 
-    # 4 — Derive metadata
+    telemetry.cache_misses.add(1, {"endpoint": "query"})  # type: ignore[attr-defined]
+
+    # 3 — Try Agent Framework tool-calling loop for the selected agent.
+    with tracer.start_as_current_span("query.agent_loop") as span:  # type: ignore[attr-defined]
+        span.set_attribute("agent", agent_name)  # type: ignore[attr-defined]
+
+        agents: dict[str, Any] = getattr(request.app.state, "agents", {})
+        agent = agents.get(agent_name)
+
+        answer: str | None = None
+        tokens: int = 0
+        results: list[SearchResult] = []
+
+        if agent is not None:
+            logger.debug("Routing question to Agent Framework agent '%s'", agent_name)
+            answer, tokens = await _run_agent_loop(agent, req.question)
+
+        # 4 — Fall back to direct RAG when the agent is unavailable or failed.
+        if answer is None:
+            logger.debug("Agent '%s' unavailable — using direct RAG fallback", agent_name)
+            results = await _search_index(
+                req.question,
+                top=req.top_k or settings.search_top_k,
+                iq_layer=req.iq_layers[0] if req.iq_layers else None,
+            )
+            system_prompt, user_prompt = _build_rag_prompt(req.question, results)
+            answer, tokens = await _call_openai(system_prompt, user_prompt)
+
+    # 5 — Derive metadata
     citations = _results_to_citations(results)
     iq_layers = _extract_iq_layers(answer)
-    # Simple confidence heuristic based on citation count and score
     confidence = min(
         0.95,
         sum(c.relevance_score for c in citations) / max(len(citations), 1),
@@ -590,7 +650,11 @@ async def query_endpoint(req: QueryRequest, request: Request) -> QueryResponse:
 
     latency_ms = int((time.monotonic() - t0) * 1000)
 
-    return QueryResponse(
+    # 6 — Record telemetry
+    telemetry.query_duration.record(latency_ms, {"endpoint": "query", "agent": agent_name})  # type: ignore[attr-defined]
+    telemetry.query_tokens.add(tokens, {"endpoint": "query", "agent": agent_name})  # type: ignore[attr-defined]
+
+    response_obj = QueryResponse(
         answer=answer,
         citations=citations,
         agent=agent_name,
@@ -600,11 +664,17 @@ async def query_endpoint(req: QueryRequest, request: Request) -> QueryResponse:
         latency_ms=latency_ms,
     )
 
+    # 7 — Cache the response payload
+    payload = response_obj.model_dump(mode="json")
+    await set_cached(cache_key, payload, ttl=TTL_SEARCH)
+
+    return JSONResponse(content=payload, headers={"X-Cache": "MISS"})
+
 
 # ── Research ──────────────────────────────────────────────────────────────────
 
-@app.post("/api/research", response_model=ResearchResponse, tags=["Research"])
-async def research_endpoint(req: ResearchRequest, request: Request) -> ResearchResponse:
+@app.post("/api/research", tags=["Research"])
+async def research_endpoint(req: ResearchRequest, request: Request) -> Response:
     """
     Customer research endpoint.
 
@@ -613,9 +683,28 @@ async def research_endpoint(req: ResearchRequest, request: Request) -> ResearchR
 
     Falls back to direct Bing + AI Search + LLM synthesis when the
     Agent Framework workflow is unavailable.
+
+    Responses are cached in Redis (TTL_LLM) and the X-Cache header indicates
+    HIT or MISS.
     """
     t0 = time.monotonic()
     settings = get_settings()
+    telemetry = get_metrics()
+    tracer = get_tracer()
+
+    # Cache lookup
+    cache_key = make_cache_key(
+        req.company,
+        agent="research",
+        filters={"industry": req.industry, "focus_areas": sorted(req.focus_areas or [])},
+    )
+    cached_payload = await get_cached(cache_key)
+    if cached_payload is not None:
+        telemetry.cache_hits.add(1, {"endpoint": "research"})  # type: ignore[attr-defined]
+        logger.debug("Cache HIT for research key %s", cache_key[:16])
+        return JSONResponse(content=cached_payload, headers={"X-Cache": "HIT"})
+
+    telemetry.cache_misses.add(1, {"endpoint": "research"})  # type: ignore[attr-defined]
 
     # 1 — Attempt the customer-outcome workflow (researcher → architect → story-weaver).
     workflows: dict[str, Any] = getattr(request.app.state, "workflows", {})
@@ -696,7 +785,11 @@ async def research_endpoint(req: ResearchRequest, request: Request) -> ResearchR
 
     latency_ms = int((time.monotonic() - t0) * 1000)
 
-    return ResearchResponse(
+    # Record telemetry
+    telemetry.query_duration.record(latency_ms, {"endpoint": "research"})  # type: ignore[attr-defined]
+    telemetry.query_tokens.add(tokens, {"endpoint": "research"})  # type: ignore[attr-defined]
+
+    response_obj = ResearchResponse(
         company=req.company,
         industry=req.industry,
         summary=summary,
@@ -706,6 +799,12 @@ async def research_endpoint(req: ResearchRequest, request: Request) -> ResearchR
         tokens_used=tokens,
         latency_ms=latency_ms,
     )
+
+    # Cache with longer TTL (LLM synthesis is expensive)
+    payload = response_obj.model_dump(mode="json")
+    await set_cached(cache_key, payload, ttl=TTL_LLM)
+
+    return JSONResponse(content=payload, headers={"X-Cache": "MISS"})
 
 
 # ── Search ────────────────────────────────────────────────────────────────────
@@ -865,3 +964,50 @@ async def ingest_status(job_id: str) -> IngestJobStatus:
     if not job:
         return IngestJobStatus(job_id=job_id, status="not_found")
     return job
+
+
+# ── Cache management ──────────────────────────────────────────────────────────
+
+def _require_admin_key(x_admin_key: str | None = Header(default=None)) -> None:
+    """
+    Dependency that enforces the ADMIN_API_KEY when it is configured.
+
+    If ADMIN_API_KEY is empty (dev/local), all requests are allowed through.
+    """
+    settings = get_settings()
+    required = settings.admin_api_key
+    if required and x_admin_key != required:
+        raise HTTPException(status_code=403, detail="Invalid or missing X-Admin-Key header")
+
+
+@app.post(
+    "/api/cache/invalidate",
+    tags=["Admin"],
+    summary="Invalidate cached query results",
+    dependencies=[Depends(_require_admin_key)],
+)
+async def cache_invalidate(req: CacheInvalidateRequest) -> JSONResponse:
+    """
+    Delete cached entries matching the provided glob *pattern*.
+
+    Defaults to ``"*"`` which flushes the entire query cache.
+
+    Requires the ``X-Admin-Key`` header when ``ADMIN_API_KEY`` is configured.
+
+    Example
+    -------
+    ```
+    POST /api/cache/invalidate
+    X-Admin-Key: <your-key>
+
+    {"pattern": "*"}
+    ```
+    """
+    deleted = await invalidate_pattern(req.pattern)
+    return JSONResponse(
+        content={
+            "pattern": req.pattern,
+            "keys_deleted": deleted,
+            "status": "ok",
+        }
+    )
