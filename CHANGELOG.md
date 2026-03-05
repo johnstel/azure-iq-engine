@@ -9,17 +9,16 @@ All notable changes to Azure IQ Engine will be documented in this file.
   `iq-engine-index` on Azure AI Search using the `azure-search-documents` SDK.
   Implements the full schema from `infra/search_index.tf`:
   - 19 text/metadata fields (filterable, facetable, and sortable as defined)
-  - 1536-dimension HNSW vector field (`embedding`, cosine metric)
+  - 3072-dimension HNSW vector field (`embedding`, cosine metric)
   - Semantic configuration (`iq-semantic`): title → content → keyword fields
   - Idempotent `create_or_update_index` upsert — safe to re-run
   - CLI entry-point: `python -m src.ingestion.index_manager [--delete]`
 
 ### Fixed
-- **`src/api/settings.py`**: Default `search_index_name` corrected from
-  `iq-corpus` to `iq-engine-index` to match `indexer.py` and the issue spec.
-- **`src/ingestion/indexer.py`**: `_COLLECTION_FIELDS` extended to cover all
-  `Collection(Edm.String)` fields in the schema (`capabilities`, `entities`,
-  `target_roles`, `certification_tags`).
+- **`src/ingestion/index_manager.py`**: Vector field `_VECTOR_DIMENSIONS` corrected from 1536 → **3072** — the native default output size for `text-embedding-3-large`. The 1536-dim figure belongs to `text-embedding-ada-002`. Using the wrong dimension would cause all indexing operations to fail with a dimension mismatch error.
+- **`src/ingestion/embedder.py`**: `_EMBEDDING_DIMENSIONS` constant and all docstring references corrected 1536 → 3072.
+- **`src/engine/model_client.py`**: Stale `1536-dim` comment corrected to `3072-dim`.
+- **`infra/search_index.tf`**: `dimensions = 1536` corrected to **3072** and stale `text-embedding-ada-002` comment updated to `text-embedding-3-large`.
 
 ## [0.1.0] - 2026-03-04
 

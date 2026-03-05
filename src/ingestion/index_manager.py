@@ -5,7 +5,7 @@ Provisions the ``iq-engine-index`` on Azure AI Search using the
 ``azure-search-documents`` SDK.  The schema mirrors ``infra/search_index.tf``:
 
 - 19 text / metadata fields (filterable, facetable, sortable as appropriate)
-- 1 × 1536-dimension vector field (HNSW, cosine, text-embedding-3-large)
+- 1 × 3072-dimension vector field (HNSW, cosine, text-embedding-3-large)
 - Semantic configuration: title → content → keywords (azure_services /
   capabilities / iq_layers)
 
@@ -54,7 +54,7 @@ logger = logging.getLogger(__name__)
 # ── Constants ──────────────────────────────────────────────────────────────────
 
 INDEX_NAME = "iq-engine-index"
-_VECTOR_DIMENSIONS = 1536
+_VECTOR_DIMENSIONS = 3072
 _HNSW_ALGORITHM_NAME = "iq-hnsw"
 _VECTOR_PROFILE_NAME = "iq-hnsw-profile"
 _SEMANTIC_CONFIG_NAME = "iq-semantic"
@@ -208,7 +208,7 @@ def _build_fields() -> list[SearchField | SimpleField | SearchableField]:
             name="learn_lab_url",
             type=SearchFieldDataType.String,
         ),
-        # ── Embedding vector (text-embedding-3-large = 1536 dims) ────────────
+        # ── Embedding vector (text-embedding-3-large = 3072 dims) ────────────
         SearchField(
             name="embedding",
             type=SearchFieldDataType.Collection(SearchFieldDataType.Single),
