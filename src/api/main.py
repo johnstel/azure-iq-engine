@@ -203,7 +203,7 @@ async def _search_index(
 
     endpoint = (
         f"{settings.search_endpoint}/indexes/{settings.search_index_name}"
-        f"/docs/search?api-version=2024-05-01-preview"
+        f"/docs/search?api-version=2024-07-01"
     )
 
     # Build OData filter
@@ -859,7 +859,7 @@ async def sources_endpoint() -> SourcesResponse:
         try:
             facet_endpoint = (
                 f"{settings.search_endpoint}/indexes/{settings.search_index_name}"
-                f"/docs/search?api-version=2024-05-01-preview"
+                f"/docs/search?api-version=2024-07-01"
             )
             async with httpx.AsyncClient(timeout=10.0) as client:
                 resp = await client.post(
