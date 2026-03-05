@@ -27,7 +27,8 @@ from typing import Any
 import httpx
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse
+from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 
 from .models import (
     HealthResponse,
@@ -391,8 +392,13 @@ async def _run_ingestion(job_id: str, req: IngestRunRequest) -> None:
 # ── Routes ────────────────────────────────────────────────────────────────────
 
 @app.get("/", include_in_schema=False)
-async def root() -> RedirectResponse:
-    """Redirect bare root to Swagger UI."""
+async def root() -> FileResponse:
+    """Serve the web UI (falls back to Swagger if no static file)."""
+    import pathlib
+    static_dir = pathlib.Path(__file__).resolve().parent.parent / "static"
+    index = static_dir / "index.html"
+    if index.exists():
+        return FileResponse(index, media_type="text/html")
     return RedirectResponse(url="/docs")
 
 
