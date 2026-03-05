@@ -31,6 +31,7 @@ from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from .models import (
+    Citation,
     HealthResponse,
     InfoResponse,
     IngestJobStatus,
@@ -38,11 +39,18 @@ from .models import (
     IQOpportunity,
     QueryRequest,
     QueryResponse,
+    QuizAnswer,
+    QuizChoice,
+    QuizGenerateRequest,
+    QuizGenerateResponse,
+    QuizGradeRequest,
+    QuizGradeResponse,
+    QuizGradeResult,
+    QuizQuestion,
     ResearchRequest,
     ResearchResponse,
     SearchResponse,
     SearchResult,
-    Citation,
     SourceStats,
     SourcesResponse,
 )
@@ -55,6 +63,10 @@ logger = logging.getLogger(__name__)
 # ── In-process job store (MVP) ────────────────────────────────────────────────
 # Replace with Azure Table Storage or Service Bus for production.
 _jobs: dict[str, IngestJobStatus] = {}
+
+# ── In-process quiz session store (MVP) ──────────────────────────────────────
+# Maps session_id → {question_id: {correct_answer, explanation, type}}
+_quiz_sessions: dict[str, dict[str, dict]] = {}
 
 
 # ── App lifecycle ─────────────────────────────────────────────────────────────
@@ -106,6 +118,10 @@ def create_app() -> FastAPI:
             RateLimitRule(
                 path_prefix="/api/research",
                 rpm=settings.rate_limit_research_rpm,
+            ),
+            RateLimitRule(
+                path_prefix="/api/quiz",
+                rpm=settings.rate_limit_query_rpm,
             ),
         ],
     )
@@ -674,6 +690,267 @@ async def sources_endpoint() -> SourcesResponse:
         total_chunks=total_chunks,
         index_name=settings.search_index_name,
     )
+
+
+# ── Quiz / Learn ──────────────────────────────────────────────────────────────
+
+def _build_quiz_system_prompt() -> str:
+    return (
+        "You are an expert quiz generator for Microsoft Azure IQ (Work IQ, Fabric IQ, "
+        "Foundry IQ) and Azure services. "
+        "Generate clear, accurate quiz questions grounded in the provided corpus context. "
+        "Return a JSON array of question objects. Each object must have these exact fields:\n"
+        '  "id": string (e.g. "q1", "q2", …)\n'
+        '  "question": string\n'
+        '  "type": "multiple_choice" or "free_form"\n'
+        '  "choices": [{"key":"A","text":"…"},…] for multiple_choice, or null for free_form\n'
+        '  "correct_answer": string (choice key "A"/"B"/"C"/"D" for MC, concise answer for FF)\n'
+        '  "explanation": string (2-3 sentences explaining why the answer is correct)\n'
+        '  "difficulty": "beginner", "intermediate", or "advanced"\n'
+        '  "topic": string (short topic label)\n'
+        '  "iq_layer": "work-iq", "fabric-iq", "foundry-iq", or null\n'
+        "Return ONLY the JSON array, no markdown fences or other text."
+    )
+
+
+def _build_quiz_user_prompt(
+    req: QuizGenerateRequest,
+    context: str,
+) -> str:
+    type_instruction = {
+        "multiple_choice": "ALL questions must be multiple_choice with exactly 4 choices (A, B, C, D).",
+        "free_form": "ALL questions must be free_form with no choices.",
+        "mixed": "Mix multiple_choice (3/5) and free_form (2/5) questions.",
+    }.get(req.question_type, "")
+
+    domain_hint = f"\nCertification domain: {req.domain}" if req.domain else ""
+    layer_hint = f"\nFocus on IQ layer: {req.iq_layer}" if req.iq_layer else ""
+    topic_hint = f"\nFocus topic: {req.topic}" if req.topic else ""
+
+    return (
+        f"## Corpus Context\n{context}\n\n"
+        f"## Quiz Parameters\n"
+        f"Count: {req.count} questions\n"
+        f"Difficulty: {req.difficulty}\n"
+        f"{type_instruction}"
+        f"{topic_hint}{layer_hint}{domain_hint}\n\n"
+        "Generate exactly the requested number of quiz questions based on the corpus above."
+    )
+
+
+@app.post("/api/quiz/generate", response_model=QuizGenerateResponse, tags=["Quiz"])
+async def quiz_generate(req: QuizGenerateRequest) -> QuizGenerateResponse:
+    """
+    Generate quiz questions grounded in the IQ corpus.
+
+    Correct answers are stored server-side (keyed by session_id) and not
+    returned to the client until /api/quiz/grade is called.
+    """
+    import json as _json
+
+    t0 = time.monotonic()
+
+    # 1 — Retrieve corpus context relevant to the topic
+    search_query = req.topic or (
+        f"{req.iq_layer or 'Microsoft IQ'} {req.difficulty} concepts"
+    )
+    results = await _search_index(
+        search_query,
+        top=8,
+        iq_layer=req.iq_layer,
+    )
+    context = "\n\n".join(
+        f"[{i + 1}] {r.title}\n{r.snippet}" for i, r in enumerate(results)
+    ) or "No corpus context available — generate from general Azure IQ knowledge."
+
+    # 2 — Ask LLM to generate questions
+    system_prompt = _build_quiz_system_prompt()
+    user_prompt = _build_quiz_user_prompt(req, context)
+    raw, _tokens = await _call_openai(system_prompt, user_prompt)
+
+    # 3 — Parse JSON response
+    questions: list[QuizQuestion] = []
+    session_data: dict[str, dict] = {}
+
+    try:
+        items = _json.loads(raw)
+        if not isinstance(items, list):
+            items = [items]
+        for item in items:
+            q_id = str(item.get("id", f"q{len(questions) + 1}"))
+            q_type = item.get("type", "multiple_choice")
+            choices_raw = item.get("choices") or []
+            choices = [QuizChoice(key=c["key"], text=c["text"]) for c in choices_raw] if choices_raw else None
+            correct_answer = str(item.get("correct_answer", ""))
+            explanation = str(item.get("explanation", ""))
+
+            # Store correct answer server-side (never sent to client on generate)
+            session_data[q_id] = {
+                "correct_answer": correct_answer,
+                "explanation": explanation,
+                "type": q_type,
+            }
+
+            questions.append(
+                QuizQuestion(
+                    id=q_id,
+                    question=str(item.get("question", "")),
+                    type=q_type,
+                    choices=choices,
+                    difficulty=item.get("difficulty", req.difficulty),
+                    topic=str(item.get("topic", req.topic or "Microsoft IQ")),
+                    iq_layer=item.get("iq_layer"),
+                )
+            )
+    except (_json.JSONDecodeError, KeyError, TypeError) as exc:
+        logger.warning("Could not parse quiz JSON from LLM: %s | raw=%s", exc, raw[:300])
+        # Graceful fallback: return a single stub question so the UI stays functional
+        q_id = "q1"
+        session_data[q_id] = {
+            "correct_answer": "A",
+            "explanation": "The quiz generator encountered an issue. Please try again.",
+            "type": "multiple_choice",
+        }
+        questions = [
+            QuizQuestion(
+                id=q_id,
+                question="Which layer of the Microsoft IQ stack focuses on knowledge work?",
+                type="multiple_choice",
+                choices=[
+                    QuizChoice(key="A", text="Work IQ"),
+                    QuizChoice(key="B", text="Fabric IQ"),
+                    QuizChoice(key="C", text="Foundry IQ"),
+                    QuizChoice(key="D", text="Azure IQ"),
+                ],
+                difficulty=req.difficulty,
+                topic="Microsoft IQ Overview",
+                iq_layer="work-iq",
+            )
+        ]
+
+    # 4 — Register session
+    session_id = str(uuid.uuid4())
+    _quiz_sessions[session_id] = session_data
+
+    latency_ms = int((time.monotonic() - t0) * 1000)
+    logger.info(
+        "Quiz session %s created — %d questions, difficulty=%s, latency=%dms",
+        session_id, len(questions), req.difficulty, latency_ms,
+    )
+
+    return QuizGenerateResponse(
+        session_id=session_id,
+        questions=questions,
+        topic=req.topic,
+        difficulty=req.difficulty,
+        domain=req.domain,
+    )
+
+
+@app.post("/api/quiz/grade", response_model=QuizGradeResponse, tags=["Quiz"])
+async def quiz_grade(req: QuizGradeRequest) -> QuizGradeResponse:
+    """
+    Grade submitted quiz answers and return explanations.
+
+    Multiple-choice answers are graded with exact match.
+    Free-form answers are evaluated by the LLM for correctness.
+    """
+    import json as _json
+
+    session = _quiz_sessions.get(req.session_id)
+    if session is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Quiz session '{req.session_id}' not found or expired.",
+        )
+
+    results: list[QuizGradeResult] = []
+    correct_count = 0
+
+    for answer in req.answers:
+        q_data = session.get(answer.question_id)
+        if q_data is None:
+            # Unknown question — skip gracefully
+            continue
+
+        correct_answer = q_data["correct_answer"]
+        explanation = q_data["explanation"]
+        q_type = q_data["type"]
+
+        if q_type == "multiple_choice":
+            # Exact match (case-insensitive key comparison)
+            is_correct = answer.answer.strip().upper() == correct_answer.strip().upper()
+            score = 1.0 if is_correct else 0.0
+            feedback = "Correct! Well done." if is_correct else f"Incorrect. The correct answer is {correct_answer}."
+        else:
+            # Free-form: ask LLM to evaluate
+            score, feedback = await _grade_free_form(
+                answer.answer, correct_answer, explanation
+            )
+            is_correct = score >= 0.7
+
+        if is_correct:
+            correct_count += 1
+
+        results.append(
+            QuizGradeResult(
+                question_id=answer.question_id,
+                correct=is_correct,
+                score=round(score, 3),
+                correct_answer=correct_answer,
+                explanation=explanation,
+                feedback=feedback,
+            )
+        )
+
+    result_count = len(results)
+    total_score = (sum(r.score for r in results) / result_count) if result_count else 0.0
+
+    return QuizGradeResponse(
+        session_id=req.session_id,
+        results=results,
+        total_score=round(total_score, 3),
+        correct_count=correct_count,
+        total_count=result_count,
+    )
+
+
+async def _grade_free_form(
+    submitted: str,
+    correct_answer: str,
+    explanation: str,
+) -> tuple[float, str]:
+    """
+    Use the LLM to evaluate a free-form quiz answer.
+
+    Returns (score 0.0-1.0, feedback string).
+    Degrades gracefully when Foundry is not configured.
+    """
+    system_prompt = (
+        "You are a quiz grader. Evaluate the submitted answer against the correct answer. "
+        "Respond with a JSON object containing:\n"
+        '  "score": float between 0.0 (completely wrong) and 1.0 (fully correct)\n'
+        '  "feedback": string (1-2 sentences of constructive feedback)\n'
+        "Return ONLY the JSON object."
+    )
+    user_prompt = (
+        f"Correct answer: {correct_answer}\n"
+        f"Explanation: {explanation}\n"
+        f"Submitted answer: {submitted}\n\n"
+        "Score and give feedback on the submitted answer."
+    )
+
+    try:
+        raw, _ = await _call_openai(system_prompt, user_prompt)
+        import json as _json
+        parsed = _json.loads(raw)
+        score = float(parsed.get("score", 0.5))
+        score = max(0.0, min(1.0, score))
+        feedback = str(parsed.get("feedback", "See explanation above."))
+        return score, feedback
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Free-form grading failed, falling back to 0.5: %s", exc)
+        return 0.5, "Could not automatically grade this answer. Please review the explanation."
 
 
 # ── Ingestion ─────────────────────────────────────────────────────────────────

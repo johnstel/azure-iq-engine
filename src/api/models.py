@@ -224,6 +224,106 @@ class IngestJobStatus(BaseModel):
     progress_pct: float = Field(default=0.0, ge=0.0, le=100.0)
 
 
+# ── Quiz / Learn ──────────────────────────────────────────────────────────────
+
+class QuizChoice(BaseModel):
+    key: str = Field(..., description="Answer key, e.g. 'A', 'B', 'C', 'D'")
+    text: str = Field(..., description="Answer option text")
+
+
+class QuizQuestion(BaseModel):
+    id: str = Field(..., description="Unique question ID within the session")
+    question: str = Field(..., description="Question text")
+    type: str = Field(
+        ...,
+        pattern="^(multiple_choice|free_form)$",
+        description="Question type: 'multiple_choice' or 'free_form'",
+    )
+    choices: list[QuizChoice] | None = Field(
+        None, description="Answer choices (multiple_choice only)"
+    )
+    difficulty: str = Field(
+        ...,
+        pattern="^(beginner|intermediate|advanced)$",
+        description="Difficulty level",
+    )
+    topic: str = Field(..., description="Topic or concept being tested")
+    iq_layer: str | None = Field(None, description="IQ layer this question relates to")
+
+
+class QuizGenerateRequest(BaseModel):
+    topic: str | None = Field(
+        None,
+        max_length=200,
+        description="Optional topic hint to focus questions (e.g. 'Fabric IQ ontology')",
+    )
+    iq_layer: str | None = Field(
+        None,
+        description="Restrict to a specific IQ layer: 'work-iq', 'fabric-iq', 'foundry-iq'",
+    )
+    difficulty: str = Field(
+        default="intermediate",
+        pattern="^(beginner|intermediate|advanced)$",
+        description="Difficulty level for generated questions",
+    )
+    question_type: str = Field(
+        default="multiple_choice",
+        pattern="^(multiple_choice|free_form|mixed)$",
+        description="Type of questions to generate",
+    )
+    count: int = Field(
+        default=5,
+        ge=1,
+        le=10,
+        description="Number of questions to generate",
+    )
+    domain: str | None = Field(
+        None,
+        max_length=100,
+        description="Optional certification domain mapping (e.g. 'DP-600', 'AI-102')",
+    )
+
+
+class QuizGenerateResponse(BaseModel):
+    session_id: str = Field(..., description="Opaque session token used when grading")
+    questions: list[QuizQuestion] = Field(..., description="Generated quiz questions (no correct answers)")
+    topic: str | None = None
+    difficulty: str
+    domain: str | None = None
+
+
+class QuizAnswer(BaseModel):
+    question_id: str = Field(..., description="Must match a question ID from the generate response")
+    answer: str = Field(
+        ...,
+        min_length=1,
+        max_length=2000,
+        description="Answer key ('A'–'D') for multiple_choice, or free text for free_form",
+    )
+
+
+class QuizGradeRequest(BaseModel):
+    session_id: str = Field(..., description="Session token from the generate response")
+    answers: list[QuizAnswer] = Field(..., min_length=1)
+
+
+class QuizGradeResult(BaseModel):
+    question_id: str
+    correct: bool
+    score: float = Field(..., ge=0.0, le=1.0, description="Partial credit score [0-1]")
+    correct_answer: str = Field(..., description="The correct answer key or text")
+    explanation: str = Field(..., description="Explanation of the correct answer")
+    feedback: str = Field(..., description="Personalised feedback on the submitted answer")
+
+
+class QuizGradeResponse(BaseModel):
+    session_id: str
+    results: list[QuizGradeResult]
+    total_score: float = Field(..., ge=0.0, le=1.0, description="Overall score [0-1]")
+    correct_count: int = Field(..., ge=0)
+    total_count: int = Field(..., ge=0)
+
+
 # ── Health / Info ─────────────────────────────────────────────────────────────
 
 class HealthResponse(BaseModel):
