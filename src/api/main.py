@@ -1159,7 +1159,7 @@ async def sources_endpoint() -> SourcesResponse:
 # ── Quiz ──────────────────────────────────────────────────────────────────────
 
 
-class QuizRequest(BaseModel):
+class QuizRequest(_BaseModel):
     topic: str = "Microsoft IQ stack"
     difficulty: str = "beginner"
     count: int = 5
