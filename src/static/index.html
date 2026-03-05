@@ -132,6 +132,11 @@
   .empty-state .icon { font-size: 40px; opacity: .4; }
   .empty-state p { font-size: 13px; }
 
+  /* History action buttons */
+  .history-actions { display: flex; gap: 6px; margin-left: auto; }
+  .history-btn { background: var(--bg3); border: 1px solid var(--border); color: var(--text-dim); padding: 4px 10px; border-radius: var(--radius); font-size: 12px; cursor: pointer; transition: all .15s; white-space: nowrap; }
+  .history-btn:hover { border-color: var(--blue); color: var(--blue-light); }
+
   /* Footer */
   footer { padding: 8px 20px; background: var(--bg2); border-top: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; gap: 8px; flex-wrap: wrap; }
   footer span { font-size: 11px; color: var(--text-muted); }
@@ -197,6 +202,10 @@
             <option value="latest_updates">📰 Latest Updates</option>
             <option value="competitive_context">⚖️ Competitive Context</option>
           </select>
+          <div class="history-actions">
+            <button class="history-btn" id="clear-btn" title="Clear chat history">🗑️ Clear</button>
+            <button class="history-btn" id="export-btn" title="Export conversation as Markdown">⬇️ Export</button>
+          </div>
         </div>
         <div class="input-row">
           <textarea class="msg-input" id="msg-input" placeholder="Ask about Microsoft IQ, Fabric IQ, Foundry IQ…" rows="1"></textarea>
@@ -296,6 +305,14 @@ function escHtml(s) {
 // ─── State ─────────────────────────────────────────────────────────────────
 let isLoading = false;
 let currentTab = 'ask';
+
+// ─── localStorage keys & limits ────────────────────────────────────────────
+const LS_HISTORY  = 'iqe_chat_history';
+const LS_AGENT_PREF = 'iqe_agent_pref';
+const LS_RESEARCH = 'iqe_research';
+const MAX_HISTORY = 50;
+
+let chatMessages = []; // in-memory list of persisted message objects
 
 // ─── DOM refs ───────────────────────────────────────────────────────────────
 const chatHistory   = document.getElementById('chat-history');
@@ -397,7 +414,11 @@ async function sendMessage() {
 }
 
 // ─── Append messages ────────────────────────────────────────────────────────
-function appendUserMessage(text) {
+function appendUserMessage(text, save = true) {
+  if (save) {
+    chatMessages.push({ role: 'user', text, ts: Date.now() });
+    saveHistory();
+  }
   const div = document.createElement('div');
   div.className = 'msg user';
   div.innerHTML = `<div class="msg-bubble">${escHtml(text)}</div>`;
@@ -405,7 +426,11 @@ function appendUserMessage(text) {
   scrollBottom();
 }
 
-function appendAssistantMessage(data, agent, elapsed) {
+function appendAssistantMessage(data, agent, elapsed, save = true) {
+  if (save) {
+    chatMessages.push({ role: 'assistant', data, agent, elapsed, ts: Date.now() });
+    saveHistory();
+  }
   const content = data.answer || data.response || data.content || JSON.stringify(data);
   const citations = data.citations || data.sources || [];
   const tokens = data.tokens_used || data.token_count || null;
@@ -501,6 +526,7 @@ document.getElementById('research-btn').addEventListener('click', async () => {
       contentEl.innerHTML = renderMarkdown(content);
       resultEl.style.display = 'block';
       resultEl.scrollIntoView({ behavior: 'smooth' });
+      saveResearch({ company, content });
     }
   } catch (err) {
     alert(`Connection error: ${err.message}. Is the backend running?`);
@@ -533,9 +559,116 @@ async function loadSourceStats() {
 }
 loadSourceStats();
 
+// ─── localStorage persistence ───────────────────────────────────────────────
+function saveHistory() {
+  try {
+    localStorage.setItem(LS_HISTORY, JSON.stringify(chatMessages.slice(-MAX_HISTORY)));
+  } catch { /* storage unavailable */ }
+}
+
+function loadHistory() {
+  try {
+    const raw = localStorage.getItem(LS_HISTORY);
+    if (!raw) return;
+    const msgs = JSON.parse(raw);
+    if (!Array.isArray(msgs) || !msgs.length) return;
+    hideEmptyState();
+    msgs.forEach(msg => {
+      if (msg.role === 'user') appendUserMessage(msg.text, false);
+      else if (msg.role === 'assistant') appendAssistantMessage(msg.data, msg.agent, msg.elapsed, false);
+    });
+    chatMessages = msgs;
+  } catch { /* corrupt data */ }
+}
+
+function saveAgentPref(agent) {
+  try { localStorage.setItem(LS_AGENT_PREF, agent); } catch { /* storage unavailable */ }
+}
+
+function loadAgentPref() {
+  try {
+    const pref = localStorage.getItem(LS_AGENT_PREF);
+    if (pref) agentSelect.value = pref;
+  } catch { /* storage unavailable */ }
+}
+
+function saveResearch(data) {
+  try { localStorage.setItem(LS_RESEARCH, JSON.stringify(data)); } catch { /* storage unavailable */ }
+}
+
+function loadResearch() {
+  try {
+    const raw = localStorage.getItem(LS_RESEARCH);
+    if (!raw) return;
+    const data = JSON.parse(raw);
+    if (!data || !data.company || !data.content) return;
+    document.getElementById('research-result-title').textContent = `Research: ${data.company}`;
+    document.getElementById('research-result-content').innerHTML = renderMarkdown(data.content);
+    document.getElementById('research-result').style.display = 'block';
+  } catch { /* corrupt data */ }
+}
+
+function clearHistory() {
+  try { localStorage.removeItem(LS_HISTORY); } catch { /* storage unavailable */ }
+  chatMessages = [];
+  while (chatHistory.firstChild) chatHistory.removeChild(chatHistory.firstChild);
+  const es = document.createElement('div');
+  es.className = 'empty-state';
+  es.id = 'empty-state';
+  es.innerHTML = '<div class="icon">🧠</div><p>Ask anything about Microsoft IQ — Work IQ, Fabric IQ, or Foundry IQ.</p><p style="font-size:12px;">Use quick actions above or type your question below.</p>';
+  chatHistory.appendChild(es);
+}
+
+function exportMarkdown() {
+  if (!chatMessages.length) {
+    alert('No conversation to export yet.');
+    return;
+  }
+  const now = new Date();
+  const datePart = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+  const timePart = `${String(now.getHours()).padStart(2,'0')}${String(now.getMinutes()).padStart(2,'0')}${String(now.getSeconds()).padStart(2,'0')}`;
+  let md = '# Azure IQ Engine — Conversation Export\n\n';
+  md += `_Exported ${now.toLocaleString()}_\n\n---\n\n`;
+  chatMessages.forEach(msg => {
+    if (msg.role === 'user') {
+      md += `**You:** ${msg.text}\n\n`;
+    } else if (msg.role === 'assistant') {
+      const content = msg.data.answer || msg.data.response || msg.data.content || '';
+      md += `**Azure IQ Engine:** ${content}\n\n`;
+      const citations = msg.data.citations || msg.data.sources || [];
+      if (citations.length) {
+        md += '**Sources:**\n';
+        citations.forEach((c, i) => {
+          const url = c.source_url || c.url || '#';
+          const title = c.title || c.source || url;
+          md += `${i + 1}. [${title}](${url})\n`;
+        });
+        md += '\n';
+      }
+      md += '---\n\n';
+    }
+  });
+  const blob = new Blob([md], { type: 'text/markdown' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `iq-engine-conversation-${datePart}-${timePart}.md`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// ─── Initialise persistence ─────────────────────────────────────────────────
+loadAgentPref();
+loadHistory();
+loadResearch();
+agentSelect.addEventListener('change', () => saveAgentPref(agentSelect.value));
+document.getElementById('clear-btn').addEventListener('click', clearHistory);
+document.getElementById('export-btn').addEventListener('click', exportMarkdown);
+
 // ─── Helpers ────────────────────────────────────────────────────────────────
 function hideEmptyState() {
-  if (emptyState) emptyState.remove();
+  const es = document.getElementById('empty-state');
+  if (es) es.remove();
 }
 function setLoading(val) {
   isLoading = val;

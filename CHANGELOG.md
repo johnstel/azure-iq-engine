@@ -2,6 +2,13 @@
 
 All notable changes to Azure IQ Engine will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- **UI: Session persistence** — chat history (last 50 messages), selected agent preference, and research results are now saved to `localStorage` and automatically restored on page refresh (no server-side storage, per ADR-005).
+- **UI: Clear History button** — clears chat history from both the screen and `localStorage`.
+- **UI: Export as Markdown button** — downloads the current conversation as a `.md` file including all messages and citation sources.
+
 ## [0.1.0] - 2026-03-04
 
 ### Added
