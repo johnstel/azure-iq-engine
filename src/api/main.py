@@ -211,15 +211,15 @@ async def _search_index(
     if source_type:
         filters.append(f"source_type eq '{source_type}'")
     if iq_layer:
-        filters.append(f"iq_layer eq '{iq_layer}'")
+        filters.append(f"iq_layers/any(l: l eq '{iq_layer}')")
     filter_expr = " and ".join(filters) if filters else None
 
     body: dict[str, Any] = {
         "search": query,
         "queryType": "semantic",
-        "semanticConfiguration": "default",
+        "semanticConfiguration": "default-semantic",
         "top": top,
-        "select": "id,title,source_url,content,source_type,iq_layer,last_updated",
+        "select": "chunk_id,title,source_url,content,source_type,iq_layers,published_at,heading_path",
         "captions": "extractive",
         "answers": "extractive|count-3",
     }
@@ -251,15 +251,15 @@ async def _search_index(
 
         results.append(
             SearchResult(
-                id=doc.get("id", ""),
+                id=doc.get("chunk_id", ""),
                 title=doc.get("title", "Untitled"),
                 source_url=doc.get("source_url", ""),
                 snippet=caption or doc.get("content", "")[:300],
                 score=doc.get("@search.score", 0.0),
                 source_type=doc.get("source_type"),
-                iq_layer=doc.get("iq_layer"),
-                last_updated=doc.get("last_updated"),
-                metadata={},
+                iq_layer=", ".join(doc.get("iq_layers", [])) if doc.get("iq_layers") else None,
+                last_updated=doc.get("published_at"),
+                metadata={"heading_path": doc.get("heading_path", "")},
             )
         )
 
