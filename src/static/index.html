@@ -922,38 +922,22 @@ async function generateQuiz() {
   empty.style.display = 'none';
 
   const topicLabel = topic || 'Microsoft IQ stack';
-  const prompt = `Generate a quiz with exactly 5 multiple-choice questions about ${topicLabel} at ${difficulty} difficulty level. Each question should have 4 options (A, B, C, D) with exactly one correct answer.
-
-Return ONLY valid JSON in this exact format (no markdown fences):
-{"questions":[{"q":"question text","options":["A) option","B) option","C) option","D) option"],"correct":0,"explanation":"brief explanation"}]}
-
-Where "correct" is the 0-based index of the correct option. Make questions specific, technical, and grounded in Azure/Microsoft IQ concepts.`;
 
   try {
-    const res = await fetch('/api/query', {
+    const res = await fetch('/api/quiz/generate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ question: prompt }),
+      body: JSON.stringify({ topic: topicLabel, difficulty, count: 5 }),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
 
-    let parsed;
-    try {
-      // Try to parse JSON from the answer
-      const answer = data.answer || '';
-      const jsonMatch = answer.match(/\{[\s\S]*"questions"[\s\S]*\}/);
-      if (jsonMatch) parsed = JSON.parse(jsonMatch[0]);
-      else parsed = JSON.parse(answer);
-    } catch {
-      container.innerHTML = `<div class="error-msg">⚠️ Could not parse quiz. Try again.</div>`;
-      return;
-    }
-
-    if (!parsed.questions || !parsed.questions.length) {
+    if (!data.questions || !data.questions.length) {
       container.innerHTML = `<div class="error-msg">⚠️ No questions generated. Try a different topic.</div>`;
       return;
     }
+
+    const parsed = data;
 
     quizState = { questions: parsed.questions, current: 0, correct: 0, streak: 0 };
     scoreEl.style.display = 'block';

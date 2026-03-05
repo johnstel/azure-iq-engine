@@ -333,17 +333,24 @@ def _compute_confidence(
 
 
 def _results_to_citations(results: list[SearchResult]) -> list[Citation]:
+    # Deduplicate by source_url, keeping highest-scoring chunk per URL
+    seen: dict[str, SearchResult] = {}
+    for r in results:
+        key = r.source_url or r.id
+        if key not in seen or r.score > seen[key].score:
+            seen[key] = r
+    deduped = sorted(seen.values(), key=lambda r: r.score, reverse=True)
     return [
         Citation(
             source_url=r.source_url,
             title=r.title,
-            relevance_score=min(r.score, 1.0),
+            relevance_score=round(min(r.score, 1.0), 3),
             snippet=r.snippet,
             source_type=r.source_type,
             iq_layer=r.iq_layer,
             video_start_time=r.video_start_time,
         )
-        for r in results
+        for r in deduped
     ]
 
 
@@ -704,10 +711,62 @@ async def root() -> FileResponse:
     return RedirectResponse(url="/docs")
 
 
-@app.get("/health", response_model=HealthResponse, tags=["Health"])
-async def health() -> HealthResponse:
-    """Liveness check — always 200 when the process is alive."""
-    return HealthResponse(version=get_settings().app_version)
+@app.get("/health", tags=["Health"])
+async def health() -> JSONResponse:
+    """
+    Health check with dependency probing.
+
+    Returns 200 with ``status: healthy`` when all dependencies are reachable,
+    or 200 with ``status: degraded`` when some are down (app still serves traffic).
+    """
+    settings = get_settings()
+    checks: dict[str, str] = {}
+
+    # Check Azure AI Search
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            r = await client.get(
+                f"{settings.search_endpoint}/indexes/{settings.search_index_name}"
+                f"/stats?api-version=2024-07-01",
+                headers={"api-key": settings.search_api_key},
+            )
+            checks["search"] = "ok" if r.status_code == 200 else f"http_{r.status_code}"
+    except Exception:
+        checks["search"] = "unreachable"
+
+    # Check Azure AI Foundry
+    if settings.has_foundry:
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                r = await client.get(
+                    f"{settings.foundry_base_url}/openai/models?api-version=2024-08-01-preview",
+                    headers={"api-key": settings.foundry_key},
+                )
+                checks["foundry"] = "ok" if r.status_code in (200, 404) else f"http_{r.status_code}"
+        except Exception:
+            checks["foundry"] = "unreachable"
+    else:
+        checks["foundry"] = "not_configured"
+
+    # Check Redis cache
+    try:
+        from src.api.cache import _redis
+        if _redis:
+            await _redis.ping()
+            checks["cache"] = "ok"
+        else:
+            checks["cache"] = "in_memory"
+    except Exception:
+        checks["cache"] = "unreachable"
+
+    all_ok = all(v in ("ok", "in_memory", "not_configured") for v in checks.values())
+    status = "healthy" if all_ok else "degraded"
+
+    return JSONResponse(content={
+        "status": status,
+        "version": settings.app_version,
+        "checks": checks,
+    })
 
 
 @app.get("/info", response_model=InfoResponse, tags=["Health"])
@@ -1095,6 +1154,77 @@ async def sources_endpoint() -> SourcesResponse:
         total_chunks=total_chunks,
         index_name=settings.search_index_name,
     )
+
+
+# ── Quiz ──────────────────────────────────────────────────────────────────────
+
+
+class QuizRequest(BaseModel):
+    topic: str = "Microsoft IQ stack"
+    difficulty: str = "beginner"
+    count: int = 5
+
+
+@app.post("/api/quiz/generate", tags=["Quiz"])
+async def quiz_generate(req: QuizRequest) -> JSONResponse:
+    """
+    Generate a multiple-choice quiz grounded in the IQ corpus.
+
+    Searches for relevant content on the topic, then asks the LLM to generate
+    quiz questions based on that content.
+    """
+    t0 = time.monotonic()
+    settings = get_settings()
+
+    # Search for relevant content on the topic
+    results = await _search_index(req.topic, top=5)
+    context = "\n\n".join(
+        f"[{i + 1}] {r.title}\n{r.snippet}"
+        for i, r in enumerate(results)
+    ) or "General Azure and Microsoft IQ knowledge."
+
+    system_prompt = (
+        "You are a quiz generator for Microsoft Azure and IQ technologies. "
+        "Generate quiz questions based on the provided context material. "
+        "Questions should be specific, technical, and educational.\n\n"
+        f"Difficulty: {req.difficulty}\n\n"
+        "You MUST return ONLY valid JSON (no markdown fences, no explanation) "
+        "in this exact format:\n"
+        '{"questions":[{"q":"question text","options":["A) option","B) option",'
+        '"C) option","D) option"],"correct":0,"explanation":"brief explanation"}]}\n\n'
+        'Where "correct" is the 0-based index of the correct option.'
+    )
+
+    user_prompt = (
+        f"## Context Material\n{context}\n\n"
+        f"Generate exactly {req.count} multiple-choice questions about "
+        f"{req.topic} at {req.difficulty} difficulty level."
+    )
+
+    answer, tokens = await _call_openai(system_prompt, user_prompt)
+
+    # Parse the quiz JSON
+    questions = []
+    if answer:
+        try:
+            json_match = re.search(r"\{[\s\S]*\"questions\"[\s\S]*\}", answer)
+            if json_match:
+                parsed = json.loads(json_match.group(0))
+            else:
+                parsed = json.loads(answer)
+            questions = parsed.get("questions", [])
+        except (json.JSONDecodeError, KeyError):
+            logger.warning("Could not parse quiz JSON from LLM response")
+
+    latency_ms = int((time.monotonic() - t0) * 1000)
+
+    return JSONResponse(content={
+        "questions": questions,
+        "topic": req.topic,
+        "difficulty": req.difficulty,
+        "tokens_used": tokens,
+        "latency_ms": latency_ms,
+    })
 
 
 # ── Ingestion ─────────────────────────────────────────────────────────────────

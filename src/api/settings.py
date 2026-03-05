@@ -133,11 +133,12 @@ class Settings(BaseSettings):
 
     # ── Admin ────────────────────────────────────────────────────────────────
     admin_api_key: str = Field(
-        default="",
+        default_factory=lambda: __import__("secrets").token_hex(16),
         description=(
-            "Optional static API key protecting admin endpoints such as "
-            "POST /api/cache/invalidate (ADMIN_API_KEY). "
-            "Leave empty to allow unauthenticated access (dev only)."
+            "Static API key protecting admin endpoints such as "
+            "POST /api/cache/invalidate and POST /api/ingest/run. "
+            "Set ADMIN_API_KEY env var. If not set, a random key is "
+            "generated on startup and logged."
         ),
     )
 
