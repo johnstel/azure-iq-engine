@@ -392,7 +392,7 @@ async def _call_openai(
         logger.error("OpenAI request failed: %s", exc)
         raise HTTPException(status_code=502, detail="LLM service unavailable")
 
-    answer = data["choices"][0]["message"]["content"]
+    answer = data["choices"][0]["message"]["content"] or ""
     tokens = data.get("usage", {}).get("total_tokens", 0)
     return answer, tokens
 
@@ -589,6 +589,9 @@ def _parse_research_json(
     Falls back gracefully when *raw* is not valid JSON.
     """
     default_approach = "Engage IQ specialist for detailed discovery."
+    if not raw:
+        logger.warning("LLM returned empty/None response for research.")
+        return fallback_summary or "No response from AI model.", [], default_approach
     try:
         parsed = json.loads(raw)
         summary = parsed.get("summary", fallback_summary)
