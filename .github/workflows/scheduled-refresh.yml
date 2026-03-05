@@ -1,0 +1,48 @@
+name: Weekly Content Refresh
+
+on:
+  schedule:
+    - cron: '0 6 * * 1'  # Monday 6:00 AM UTC (1:00 AM ET)
+  workflow_dispatch:      # Allow manual trigger
+
+env:
+  ACR_NAME: acriqengine01
+  IMAGE: acriqengine01.azurecr.io/iq-engine:latest
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: ACR Login
+        run: az acr login --name ${{ env.ACR_NAME }}
+
+      - name: Run full content refresh
+        run: |
+          echo "🔄 Weekly content refresh — all sources, 100 pages each"
+          docker run --rm \
+            -e SEARCH_ENDPOINT="${{ secrets.SEARCH_ENDPOINT }}" \
+            -e SEARCH_API_KEY="${{ secrets.SEARCH_API_KEY }}" \
+            -e FOUNDRY_BASE_URL="${{ secrets.FOUNDRY_BASE_URL }}" \
+            -e FOUNDRY_KEY="${{ secrets.FOUNDRY_KEY }}" \
+            -e YOUTUBE_API_KEY="${{ secrets.YOUTUBE_API_KEY }}" \
+            -e BING_API_KEY="${{ secrets.BING_API_KEY }}" \
+            ${{ env.IMAGE }} \
+            python -m src.ingestion.orchestrator \
+              --sources all \
+              --max-pages 100 2>&1 | tee /tmp/refresh-output.txt
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "## 📅 Weekly Content Refresh" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          tail -25 /tmp/refresh-output.txt >> $GITHUB_STEP_SUMMARY 2>/dev/null
+          echo '```' >> $GITHUB_STEP_SUMMARY

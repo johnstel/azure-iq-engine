@@ -1,0 +1,95 @@
+name: Build & Deploy
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '*.md'
+      - 'docs/**'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag (e.g., v0.3.6). Leave empty for auto-increment.'
+        required: false
+        type: string
+
+env:
+  ACR_NAME: acriqengine01
+  CONTAINER_APP: ca-iq-engine-01
+  RESOURCE_GROUP: rg-iq-engine
+  IMAGE_NAME: iq-engine
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.tag }}
+      image: ${{ steps.version.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Determine version
+        id: version
+        run: |
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            TAG="${{ github.event.inputs.version }}"
+          else
+            # Auto-increment: find latest tag and bump patch
+            LATEST=$(git tag -l 'v*' --sort=-v:refname | head -1 || echo "v0.3.5")
+            MAJOR=$(echo $LATEST | cut -d. -f1)
+            MINOR=$(echo $LATEST | cut -d. -f2)
+            PATCH=$(echo $LATEST | cut -d. -f3)
+            TAG="${MAJOR}.${MINOR}.$((PATCH + 1))"
+          fi
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "image=${{ env.ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${TAG}" >> $GITHUB_OUTPUT
+          echo "🏷️ Version: $TAG"
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Build image via ACR Tasks
+        run: |
+          az acr build \
+            --registry ${{ env.ACR_NAME }} \
+            --image ${{ env.IMAGE_NAME }}:${{ steps.version.outputs.tag }} \
+            --image ${{ env.IMAGE_NAME }}:latest \
+            .
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Deploy to Container App
+        run: |
+          az containerapp update \
+            --name ${{ env.CONTAINER_APP }} \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --image ${{ needs.build.outputs.image }} \
+            --set-env-vars "APP_VERSION=${{ needs.build.outputs.version }}"
+
+      - name: Health check
+        run: |
+          sleep 30
+          STATUS=$(curl -sf --max-time 15 \
+            "https://${{ env.CONTAINER_APP }}.icygrass-2e1bb7f3.centralus.azurecontainerapps.io/health" \
+            | jq -r '.status')
+          if [ "$STATUS" = "healthy" ]; then
+            echo "✅ Deployment healthy"
+          else
+            echo "❌ Health check failed: $STATUS"
+            exit 1
+          fi
+
+      - name: Summary
+        run: |
+          echo "## 🚀 Deployed ${{ needs.build.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Image:** \`${{ needs.build.outputs.image }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **App:** https://${{ env.CONTAINER_APP }}.icygrass-2e1bb7f3.centralus.azurecontainerapps.io" >> $GITHUB_STEP_SUMMARY
