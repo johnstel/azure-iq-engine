@@ -565,6 +565,27 @@ def _parse_research_json(
         return summary, opportunities, recommended_approach
     except (json.JSONDecodeError, KeyError, TypeError) as exc:
         logger.warning("Could not parse LLM JSON response for research: %s", exc)
+        # Try to extract JSON from markdown fences
+        import re
+        json_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", raw, re.DOTALL)
+        if json_match:
+            try:
+                parsed = json.loads(json_match.group(1))
+                summary = parsed.get("summary", fallback_summary)
+                recommended_approach = parsed.get("recommended_approach", default_approach)
+                opportunities = [
+                    IQOpportunity(
+                        layer=opp.get("layer", "foundry-iq"),
+                        title=opp.get("title", ""),
+                        description=opp.get("description", ""),
+                        services=opp.get("services", []),
+                        priority=opp.get("priority", "medium"),
+                    )
+                    for opp in parsed.get("iq_opportunities", [])
+                ]
+                return summary, opportunities, recommended_approach
+            except Exception:
+                pass
         return fallback_summary, [], default_approach
 
 
@@ -844,10 +865,42 @@ async def research_endpoint(req: ResearchRequest, request: Request) -> Response:
             "You are a Microsoft Azure IQ specialist preparing a customer research brief. "
             "Synthesise the provided web research and IQ corpus context into a structured "
             "opportunity assessment. Be specific about IQ layers (Work IQ, Fabric IQ, "
-            "Foundry IQ) and relevant Azure services. Output valid JSON matching this schema:\n"
-            '{"summary": "...", "iq_opportunities": [{"layer": "...", "title": "...", '
-            '"description": "...", "services": ["..."], "priority": "high|medium|low"}], '
-            '"recommended_approach": "..."}'
+            "Foundry IQ) and relevant Azure services.\n\n"
+            "You MUST output valid JSON matching this exact schema:\n"
+            "```json\n"
+            "{\n"
+            '  "summary": "2-3 paragraph executive summary of IQ opportunities",\n'
+            '  "iq_opportunities": [\n'
+            '    {\n'
+            '      "layer": "Work IQ|Fabric IQ|Foundry IQ",\n'
+            '      "title": "Short opportunity title",\n'
+            '      "description": "Why this matters for the customer and what it enables",\n'
+            '      "services": ["Azure Service 1", "Azure Service 2"],\n'
+            '      "priority": "high|medium|low"\n'
+            "    }\n"
+            "  ],\n"
+            '  "recommended_approach": "Phased implementation recommendation"\n'
+            "}\n"
+            "```\n\n"
+            "IMPORTANT: Always include at least 3 iq_opportunities. Here is an example:\n\n"
+            '{"summary": "Contoso Manufacturing can leverage Microsoft IQ layers to transform '
+            "operations across factory floor intelligence, supply chain analytics, and workforce "
+            'productivity.", "iq_opportunities": [{"layer": "Foundry IQ", "title": "Predictive '
+            'Maintenance with Azure AI", "description": "Deploy anomaly detection models on IoT '
+            "sensor data to predict equipment failures 48 hours in advance, reducing unplanned "
+            'downtime by 30%.", "services": ["Azure IoT Hub", "Azure Machine Learning", '
+            '"Azure AI Services"], "priority": "high"}, {"layer": "Fabric IQ", "title": '
+            '"Unified Supply Chain Analytics", "description": "Consolidate ERP, logistics, and '
+            "demand data in Microsoft Fabric for real-time supply chain visibility and automated "
+            'reorder triggers.", "services": ["Microsoft Fabric", "Power BI", "Azure Data Factory"], '
+            '"priority": "high"}, {"layer": "Work IQ", "title": "Connected Workforce with Copilot", '
+            '"description": "Enable frontline workers with M365 Copilot for shift handoff summaries, '
+            'safety incident reporting, and knowledge retrieval.", "services": ["Microsoft 365 Copilot", '
+            '"Microsoft Teams", "SharePoint"], "priority": "medium"}], '
+            '"recommended_approach": "Start with Foundry IQ (Phase 1, 3 weeks) for immediate '
+            "ROI through predictive maintenance, then layer in Fabric IQ (Phase 2) for analytics, "
+            'and Work IQ (Phase 3) for workforce enablement."}\n\n'
+            "Return ONLY the JSON object. No markdown fences, no explanation."
         )
 
         user_prompt = (

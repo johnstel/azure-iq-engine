@@ -200,16 +200,16 @@
     <div class="header-actions">
       <button class="hdr-btn" id="clear-history-btn" title="Clear chat history">🗑️</button>
       <button class="hdr-btn" id="export-md-btn" title="Export as Markdown">📥</button>
-      <button class="hdr-btn" id="theme-toggle-btn" title="Toggle light/dark theme">🌙</button>
+      <button class="hdr-btn" id="theme-toggle-btn" aria-label="Toggle dark/light theme" title="Toggle light/dark theme">🌙</button>
     </div>
   </header>
 
   <!-- Tabs -->
   <div class="tabs">
-    <div class="tab active" data-tab="ask">💬 Ask</div>
-    <div class="tab" data-tab="research">🔍 Research</div>
-    <div class="tab" data-tab="explore">📚 Explore</div>
-    <div class="tab" data-tab="quiz">🎯 Quiz</div>
+    <div class="tab active" data-tab="ask" role="tab" aria-selected="true" aria-label="Ask tab">💬 Ask</div>
+    <div class="tab" data-tab="research" role="tab" aria-label="Research tab">🔍 Research</div>
+    <div class="tab" data-tab="explore" role="tab" aria-label="Explore tab">📚 Explore</div>
+    <div class="tab" data-tab="quiz" role="tab" aria-label="Quiz tab">🎯 Quiz</div>
   </div>
 
   <!-- Quick actions -->
@@ -236,7 +236,7 @@
       </div>
       <div class="input-area">
         <div class="input-controls">
-          <select class="agent-select" id="agent-select">
+          <select class="agent-select" id="agent-select" aria-label="Select AI agent">
             <option value="auto">🤖 Auto-route</option>
             <option value="iq-architect">🏗️ IQ Architect</option>
             <option value="azure-navigator">🗺️ Azure Navigator</option>
@@ -251,7 +251,7 @@
         </div>
         <div class="input-row">
           <textarea class="msg-input" id="msg-input" placeholder="Ask about Microsoft IQ, Fabric IQ, Foundry IQ…" rows="1"></textarea>
-          <button class="send-btn" id="send-btn">Send</button>
+          <button class="send-btn" id="send-btn" aria-label="Send question">Send</button>
         </div>
       </div>
     </div>
@@ -263,7 +263,7 @@
         <p style="font-size:12px;color:var(--text-dim)">Analyze a company through the Microsoft IQ lens — identify strategic fit, use cases, and relevant IQ capabilities.</p>
         <div class="form-group">
           <label>Company Name *</label>
-          <input type="text" class="form-input" id="company-name" placeholder="e.g. Contoso Energy, Fabrikam Inc.">
+          <input type="text" class="form-input" id="company-name" aria-label="Company name for IQ assessment" required placeholder="e.g. Contoso Energy, Fabrikam Inc.">
         </div>
         <div class="form-group">
           <label>Industry</label>
@@ -299,7 +299,7 @@
       <div style="background:var(--bg2); border:1px solid var(--border); border-radius:var(--radius-lg); padding:20px;">
         <h2 style="font-size:15px; color:var(--text); margin-bottom:12px;">📚 Browse the Knowledge Corpus</h2>
         <div style="display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap;">
-          <input type="text" class="form-input" id="explore-query" placeholder="Search the corpus…" style="flex:1; min-width:200px;">
+          <input type="text" class="form-input" id="explore-query" aria-label="Search the knowledge corpus" placeholder="Search the corpus…" style="flex:1; min-width:200px;">
           <select class="form-select" id="explore-source-filter" style="max-width:180px;">
             <option value="">All sources</option>
           </select>
