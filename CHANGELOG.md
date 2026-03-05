@@ -2,6 +2,11 @@
 
 All notable changes to Azure IQ Engine will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- **UI:** Dark/light theme toggle in the header with Fluent Design light colors. Preference is persisted in `localStorage`.
+
 ## [0.1.0] - 2026-03-04
 
 ### Added
