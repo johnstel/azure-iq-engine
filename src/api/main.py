@@ -228,7 +228,7 @@ async def _search_index(
         "queryType": "semantic",
         "semanticConfiguration": "default-semantic",
         "top": top,
-        "select": "chunk_id,title,source_url,content,source_type,iq_layers,published_at,heading_path",
+        "select": "chunk_id,title,source_url,content,source_type,iq_layers,published_at,heading_path,video_id,video_start_time,video_end_time",
         "captions": "extractive",
         "answers": "extractive|count-3",
     }
@@ -258,16 +258,28 @@ async def _search_index(
         if captions:
             caption = captions[0].get("text", "")
 
+        # Build source URL with timestamp for video content
+        raw_url = doc.get("source_url", "")
+        vid_id = doc.get("video_id")
+        vid_start = doc.get("video_start_time")
+        if vid_id and not raw_url.startswith("http"):
+            raw_url = f"https://www.youtube.com/watch?v={vid_id}"
+        if vid_id and vid_start is not None and "youtube.com" in raw_url:
+            raw_url = f"https://www.youtube.com/watch?v={vid_id}&t={int(vid_start)}"
+
         results.append(
             SearchResult(
                 id=doc.get("chunk_id", ""),
                 title=doc.get("title", "Untitled"),
-                source_url=doc.get("source_url", ""),
+                source_url=raw_url,
                 snippet=caption or doc.get("content", "")[:300],
                 score=doc.get("@search.score", 0.0),
                 source_type=doc.get("source_type"),
                 iq_layer=", ".join(doc.get("iq_layers", [])) if doc.get("iq_layers") else None,
                 last_updated=doc.get("published_at"),
+                video_id=vid_id,
+                video_start_time=vid_start,
+                video_end_time=doc.get("video_end_time"),
                 metadata={"heading_path": doc.get("heading_path", "")},
             )
         )
@@ -284,6 +296,7 @@ def _results_to_citations(results: list[SearchResult]) -> list[Citation]:
             snippet=r.snippet,
             source_type=r.source_type,
             iq_layer=r.iq_layer,
+            video_start_time=r.video_start_time,
         )
         for r in results
     ]

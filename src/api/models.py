@@ -28,6 +28,9 @@ class Citation(BaseModel):
     iq_layer: str | None = Field(
         None, description="IQ layer this document relates to"
     )
+    video_start_time: float | None = Field(
+        None, description="Start timestamp in seconds (for video deep-linking)"
+    )
 
 
 class IQOpportunity(BaseModel):
@@ -156,6 +159,9 @@ class SearchResult(BaseModel):
     source_type: str | None = None
     iq_layer: str | None = None
     last_updated: datetime | None = None
+    video_id: str | None = Field(None, description="YouTube video ID")
+    video_start_time: float | None = Field(None, description="Chunk start timestamp in seconds")
+    video_end_time: float | None = Field(None, description="Chunk end timestamp in seconds")
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
