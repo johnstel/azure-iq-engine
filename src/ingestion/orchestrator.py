@@ -807,5 +807,36 @@ def main() -> None:
     sys.exit(0 if result.succeeded else 1)
 
 
+async def run_ingestion(
+    sources: list[str] | None = None,
+    force_recrawl: bool = False,
+    max_pages: int = 50,
+) -> dict:
+    """
+    Programmatic entry point for the ingestion pipeline.
+
+    Called from the FastAPI background task (POST /api/ingest/run).
+    Returns a dict with {documents, chunks, errors, succeeded}.
+    """
+    config = OrchestratorConfig(
+        sources=sources or ["mslearn"],
+        checkpoint_dir=Path("checkpoints"),
+        max_pages_per_source=max_pages,
+        skip_embedding=False,
+        skip_indexing=False,
+        dry_run=False,
+        force_recrawl=force_recrawl,
+    )
+
+    result = await _async_main(config)
+
+    return {
+        "documents": result.total_documents,
+        "chunks": result.chunks_indexed,
+        "errors": [str(e) for e in result.errors] if result.errors else [],
+        "succeeded": result.succeeded,
+    }
+
+
 if __name__ == "__main__":
     main()

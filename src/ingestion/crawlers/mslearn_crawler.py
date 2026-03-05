@@ -62,6 +62,12 @@ SEED_URLS: dict[str, list[str]] = {
     "work-iq": [
         "https://learn.microsoft.com/en-us/microsoft-365-copilot/",
     ],
+    "architecture": [
+        "https://learn.microsoft.com/en-us/azure/architecture/",
+        "https://learn.microsoft.com/en-us/azure/well-architected/",
+        "https://learn.microsoft.com/en-us/azure/architecture/ai-ml/",
+        "https://learn.microsoft.com/en-us/azure/architecture/data-guide/",
+    ],
 }
 
 # Flat list of all seeds for bootstrapping
