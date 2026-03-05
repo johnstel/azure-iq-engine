@@ -381,9 +381,16 @@ class SearchIndexer:
         """
         doc: dict[str, Any] = {"@search.action": _MERGE_OR_UPLOAD}
 
+        # DateTimeOffset fields must be valid ISO-8601 or omitted (not empty string)
+        _DATE_FIELDS = {"published_at"}
+
         for key, value in chunk.items():
             if key in _COLLECTION_FIELDS:
                 doc[key] = _ensure_string_collection(value)
+            elif key in _DATE_FIELDS:
+                # Omit empty/None dates — AI Search rejects ""
+                if value:
+                    doc[key] = value
             else:
                 doc[key] = value
 
