@@ -2,6 +2,18 @@
 
 All notable changes to Azure IQ Engine will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- **Redis caching layer** (`src/api/cache.py`):
+  - Two-tier caching: search results (TTL: 1 hour) and LLM responses (TTL: 4 hours).
+  - Cache keys are SHA256 hashes of normalised query parameters (question + agent + filters).
+  - `X-Cache: HIT` / `X-Cache: MISS` response header on `POST /api/query` for observability.
+  - Graceful degradation — caching is disabled automatically when `REDIS_URL` is not set or Redis is unreachable; API continues to work normally.
+  - Cache invalidation via `invalidate_all()` is called automatically after every successful (non-dry-run) ingestion run so stale corpus-derived responses are evicted.
+- **Settings additions** (`src/api/settings.py`): `redis_url`, `cache_search_ttl` (default 3600 s), `cache_llm_ttl` (default 14400 s), and `has_redis` property.
+- **Tests** (`tests/test_api/test_cache.py`, `tests/test_api/test_query_cache.py`): 23 unit and integration tests covering key generation, get/set/invalidate operations with mocked Redis, error resilience, and the `X-Cache` header on the query endpoint.
+
 ## [0.1.0] - 2026-03-04
 
 ### Added

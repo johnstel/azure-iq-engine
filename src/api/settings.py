@@ -83,6 +83,20 @@ class Settings(BaseSettings):
         description="Max /api/research requests per minute per IP",
     )
 
+    # ── Redis / Cache ────────────────────────────────────────────────────────
+    redis_url: str = Field(
+        default="",
+        description="Redis connection URL (REDIS_URL). Leave empty to disable caching.",
+    )
+    cache_search_ttl: int = Field(
+        default=3600,
+        description="TTL in seconds for cached search results (default: 1 hour)",
+    )
+    cache_llm_ttl: int = Field(
+        default=14400,
+        description="TTL in seconds for cached LLM responses (default: 4 hours)",
+    )
+
     # ── CORS ─────────────────────────────────────────────────────────────────
     cors_origins: list[str] = Field(
         default=["*"],
@@ -111,6 +125,10 @@ class Settings(BaseSettings):
     @classmethod
     def strip_trailing_slash(cls, v: str) -> str:
         return v.rstrip("/") if v else v
+
+    @property
+    def has_redis(self) -> bool:
+        return bool(self.redis_url)
 
     @property
     def has_foundry(self) -> bool:

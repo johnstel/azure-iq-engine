@@ -25,7 +25,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 import httpx
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -45,6 +45,16 @@ from .models import (
     Citation,
     SourceStats,
     SourcesResponse,
+)
+from .cache import (
+    cache_get,
+    cache_set,
+    close_cache,
+    init_cache,
+    invalidate_all,
+    make_llm_key,
+    make_query_key,
+    make_search_key,
 )
 from .rate_limit import RateLimitMiddleware, RateLimitRule
 from .router_query import list_agents, route_question
@@ -68,7 +78,9 @@ async def lifespan(app: FastAPI):
         bool(settings.foundry_base_url),
         bool(settings.search_endpoint),
     )
+    await init_cache(settings.redis_url)
     yield
+    await close_cache()
     logger.info("Azure IQ Engine shutting down.")
 
 
@@ -128,6 +140,7 @@ async def _search_index(
     """
     Query Azure AI Search and return structured results.
 
+    Results are cached in Redis for ``cache_search_ttl`` seconds (default 1 hour).
     Returns an empty list when SEARCH_ENDPOINT is not configured so the
     app degrades gracefully during local development.
     """
@@ -135,6 +148,13 @@ async def _search_index(
     if not settings.has_search:
         logger.warning("SEARCH_ENDPOINT not configured — returning empty results")
         return []
+
+    # ── Cache look-up ──────────────────────────────────────────────────────────
+    cache_key = make_search_key(query, iq_layer=iq_layer, source_type=source_type, top_k=top)
+    cached = await cache_get(cache_key)
+    if cached is not None:
+        logger.debug("Search cache HIT for key %s", cache_key)
+        return [SearchResult(**doc) for doc in cached]
 
     endpoint = (
         f"{settings.search_endpoint}/indexes/{settings.search_index_name}"
@@ -198,6 +218,9 @@ async def _search_index(
             )
         )
 
+    # ── Cache store ────────────────────────────────────────────────────────────
+    await cache_set(cache_key, [r.model_dump(mode="json") for r in results], settings.cache_search_ttl)
+
     return results
 
 
@@ -218,11 +241,12 @@ def _results_to_citations(results: list[SearchResult]) -> list[Citation]:
 async def _call_openai(
     system_prompt: str,
     user_prompt: str,
-) -> tuple[str, int]:
+) -> tuple[str, int, bool]:
     """
     Call Azure OpenAI via the Foundry endpoint.
 
-    Returns (answer_text, tokens_used).
+    Returns (answer_text, tokens_used, cache_hit).
+    LLM responses are cached in Redis for ``cache_llm_ttl`` seconds (default 4 hours).
     Degrades gracefully when FOUNDRY_BASE_URL is not set.
     """
     settings = get_settings()
@@ -231,7 +255,15 @@ async def _call_openai(
         return (
             "[Azure AI Foundry not configured — set FOUNDRY_BASE_URL and FOUNDRY_KEY]",
             0,
+            False,
         )
+
+    # ── Cache look-up ──────────────────────────────────────────────────────────
+    llm_key = make_llm_key(system_prompt, user_prompt)
+    cached = await cache_get(llm_key)
+    if cached is not None:
+        logger.debug("LLM cache HIT for key %s", llm_key)
+        return cached["answer"], cached["tokens"], True
 
     endpoint = (
         f"{settings.foundry_base_url}/openai/deployments/"
@@ -266,7 +298,11 @@ async def _call_openai(
 
     answer = data["choices"][0]["message"]["content"]
     tokens = data.get("usage", {}).get("total_tokens", 0)
-    return answer, tokens
+
+    # ── Cache store ────────────────────────────────────────────────────────────
+    await cache_set(llm_key, {"answer": answer, "tokens": tokens}, settings.cache_llm_ttl)
+
+    return answer, tokens, False
 
 
 def _build_rag_prompt(question: str, results: list[SearchResult]) -> tuple[str, str]:
@@ -382,6 +418,11 @@ async def _run_ingestion(job_id: str, req: IngestRunRequest) -> None:
         job.completed_at = datetime.now(timezone.utc)
         logger.info("Ingestion job %s completed", job_id)
 
+        # Invalidate cache so subsequent queries reflect new corpus content
+        if not req.dry_run:
+            deleted = await invalidate_all()
+            logger.info("Cache invalidated after ingestion — %d keys evicted", deleted)
+
     except Exception as exc:  # noqa: BLE001
         job.status = "failed"
         job.errors.append(str(exc))
@@ -426,12 +467,14 @@ async def info() -> InfoResponse:
 # ── Query ─────────────────────────────────────────────────────────────────────
 
 @app.post("/api/query", response_model=QueryResponse, tags=["Query"])
-async def query_endpoint(req: QueryRequest, request: Request) -> QueryResponse:
+async def query_endpoint(req: QueryRequest, request: Request, response: Response) -> QueryResponse:
     """
     Main Q&A endpoint.
 
     Retrieves grounded context from Azure AI Search, builds a cited prompt,
-    and calls Azure OpenAI for the final answer.
+    and calls Azure OpenAI for the final answer. Results are cached in Redis
+    and the ``X-Cache: HIT`` / ``X-Cache: MISS`` response header reports
+    whether this response was served from cache.
     """
     t0 = time.monotonic()
     settings = get_settings()
@@ -439,16 +482,16 @@ async def query_endpoint(req: QueryRequest, request: Request) -> QueryResponse:
     # 1 — Route to agent
     agent = route_question(req.question, preferred_agent=req.agent)
 
-    # 2 — Retrieve context from AI Search
+    # 2 — Retrieve context from AI Search (search-result cache at 1 h TTL)
     results = await _search_index(
         req.question,
         top=req.top_k or settings.search_top_k,
         iq_layer=req.iq_layers[0] if req.iq_layers else None,
     )
 
-    # 3 — Build grounded prompt and call LLM
+    # 3 — Build grounded prompt and call LLM (LLM cache at 4 h TTL)
     system_prompt, user_prompt = _build_rag_prompt(req.question, results)
-    answer, tokens = await _call_openai(system_prompt, user_prompt)
+    answer, tokens, llm_cache_hit = await _call_openai(system_prompt, user_prompt)
 
     # 4 — Derive metadata
     citations = _results_to_citations(results)
@@ -460,6 +503,9 @@ async def query_endpoint(req: QueryRequest, request: Request) -> QueryResponse:
     ) if citations else 0.4
 
     latency_ms = int((time.monotonic() - t0) * 1000)
+
+    # 5 — Set X-Cache header (HIT when LLM response was served from cache)
+    response.headers["X-Cache"] = "HIT" if llm_cache_hit else "MISS"
 
     return QueryResponse(
         answer=answer,
@@ -527,7 +573,7 @@ async def research_endpoint(req: ResearchRequest) -> ResearchResponse:
         "Return ONLY the JSON object, no markdown fences."
     )
 
-    raw_answer, tokens = await _call_openai(system_prompt, user_prompt)
+    raw_answer, tokens, _ = await _call_openai(system_prompt, user_prompt)
 
     # 4 — Parse LLM response (graceful fallback)
     summary = raw_answer
