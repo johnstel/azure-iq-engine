@@ -18,7 +18,7 @@ Built on Azure with a dual-provider AI strategy:
 | **Search** | Azure AI Search (Basic) | Hybrid vector + BM25 + semantic reranking |
 | **Agent Runtime** | Microsoft Agent Framework (RC) | Multi-agent orchestration, function tools, MCP, A2A |
 | **Chat/Reasoning** | Azure OpenAI via Foundry | GPT-4.1 reasoning, GPT-4o-mini routing |
-| **Embeddings** | Azure OpenAI | `text-embedding-3-large` (1536-dim) |
+| **Embeddings** | Azure OpenAI | `text-embedding-3-large` (3072-dim) |
 | **State Store** | Azure Table Storage | Ingestion state, chunk fingerprints (~$2/mo) |
 | **Cache** | Azure Cache for Redis | Query results, embedding cache, research L1 |
 | **Compute** | Azure Container Apps | FastAPI API + ingestion workers |

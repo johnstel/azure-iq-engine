@@ -152,7 +152,7 @@ The engine's knowledge domain is structured around Microsoft's three IQ layers a
 **Decision:** Use **Microsoft Agent Framework** (`pip install agent-framework --pre`) with **Azure AI Foundry** as the AI backend:
 - **Agent runtime:** Agent Framework provides agent creation, function tools, multi-agent orchestration (sequential, concurrent, handoff, group chat), MCP support, streaming, checkpointing
 - **LLM inference:** Azure OpenAI via Foundry-provisioned endpoints (GPT-4.1 for reasoning, GPT-4o-mini for routing)
-- **Embeddings:** Azure OpenAI `text-embedding-3-large` (1536-dim)
+- **Embeddings:** Azure OpenAI `text-embedding-3-large` (3072-dim)
 - **Auth:** `DefaultAzureCredential` (managed identity in production)
 - **Interop:** A2A (Agent-to-Agent), AG-UI, MCP (Model Context Protocol)
 
@@ -218,7 +218,7 @@ Phase 2 addition: **parent-child chunking** — small child chunks (256 tok) for
 ### ADR-004: AI Search Tier — Start on Basic
 
 **Status:** ACCEPTED  
-**Decision:** Start on Azure AI Search **Basic** (~$75/month) instead of S1 (~$250/month). Basic tier post-April 2024 supports 3 partitions, vector search, and up to 15 GB storage. At 100K chunks with 1536-dim vectors: ~600 MB vectors + ~200 MB text/metadata = ~800 MB. Well within Basic limits.  
+**Decision:** Start on Azure AI Search **Basic** (~$75/month) instead of S1 (~$250/month). Basic tier post-April 2024 supports 3 partitions, vector search, and up to 15 GB storage. At 100K chunks with 3072-dim vectors: ~1200 MB vectors + ~200 MB text/metadata = ~1400 MB. Well within Basic limits.  
 **Upgrade trigger:** Partition utilization >80% OR query P99 >500ms → upgrade to S1.  
 **Savings:** ~$175/month in Phase 1.
 
@@ -259,7 +259,7 @@ The engine ingests from **multiple authoritative sources**, not just one. The kn
 ```
 Source → Fetch → Extract (HTML→MD / Transcript) → Chunk (512 tok, 128 overlap)
   → Classify (topic tags + IQ layer mapping + Azure service tags)
-  → Embed (text-embedding-3-large, 1536-dim)
+  → Embed (text-embedding-3-large, 3072-dim)
   → Index (Azure AI Search) + Store (Cosmos DB)
 ```
 
@@ -313,7 +313,7 @@ Every chunk is tagged with:
 | `video_id` | string (nullable) | YouTube video ID if applicable |
 | `video_timestamp` | int (nullable) | Seconds into video |
 | `ga_status` | string (nullable) | `ga` / `preview` / `deprecated` for Azure services |
-| `embedding` | vector (1536) | `text-embedding-3-large` (via Azure OpenAI — NOT Copilot SDK) |
+| `embedding` | vector (3072) | `text-embedding-3-large` (via Azure OpenAI — NOT Copilot SDK) |
 | `fingerprint` | string | SHA256(source_url + content) — deduplication key |
 | `parent_id` | string (nullable) | Parent chunk ID for parent-child chunking (Phase 2) |
 | `quality_score` | double | Computed: source authority × recency × GA status |
@@ -705,7 +705,7 @@ rg-iq-engine-dev
 | Language | Python 3.12+ |
 | Agent Framework | Microsoft Agent Framework RC (`agent-framework`, PyPI) |
 | LLM Provider | Azure OpenAI via Foundry (GPT-4.1, GPT-4o-mini) |
-| Embeddings | Azure OpenAI `text-embedding-3-large` (1536-dim) |
+| Embeddings | Azure OpenAI `text-embedding-3-large` (3072-dim) |
 | Multi-Agent Orchestration | Agent Framework workflows (sequential, concurrent, handoff) |
 | Tool Protocol | MCP (Model Context Protocol) + native function tools |
 | Agent Interop | A2A (Agent-to-Agent), AG-UI |

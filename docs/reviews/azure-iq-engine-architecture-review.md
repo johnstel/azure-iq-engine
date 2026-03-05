@@ -265,7 +265,7 @@ S1 at ~$250/month is appropriate for Phase 1. S1 supports:
 - Up to 3 GB per partition (1 partition in S1)
 - 15 indexes
 
-At 100K chunks × ~1536 floats × 4 bytes ≈ 600 MB for vectors alone, plus metadata and text content, a single-partition S1 is tight but workable. Watch the partition utilization metric closely.
+At 100K chunks × ~3072 floats × 4 bytes ≈ 1200 MB for vectors alone, plus metadata and text content, a single-partition S1 is tight but workable. Watch the partition utilization metric closely.
 
 **Upgrade trigger:** When approaching 2 GB partition utilization *or* when query latency P99 exceeds 500ms, move to S2 (~$500/month, 12 GB/partition) or add a second partition.
 
