@@ -3,6 +3,7 @@ Content fingerprinting and deduplication (ADR-002).
 
 SHA256(source_url + content) prevents duplicate chunks on re-crawl.
 Content diffing compares hashes to skip unchanged chunks (saves 70-90% embedding cost).
+Fingerprints stored in Azure Table Storage (~$2/month).
 """
 
 import hashlib
@@ -12,7 +13,7 @@ from datetime import datetime
 
 @dataclass
 class ChunkFingerprint:
-    """Fingerprint record stored in Cosmos DB for deduplication."""
+    """Fingerprint record stored in Azure Table Storage for deduplication."""
     chunk_id: str
     fingerprint: str  # SHA256 hex digest
     source_url: str

@@ -345,15 +345,15 @@ Agentic RAG, GraphRAG, retrieval augmented generation => rag
 - Keyword tokenizer + lowercase + asciifolding
 - Prevents tokenization of compound names (`text-embedding-3-large` stays intact)
 
-#### 6.2.2 Azure Cosmos DB — Document Store
+#### 6.2.2 Azure Table Storage — Ingestion State
 
-- Full source documents, complete transcripts, processing state
-- Customer research cache (web research results, generated outcome docs) — **RBAC: row-level per customer engagement**
-- Query/interaction logs (90-day TTL)
+Replaces Cosmos DB (v3.0) — no user state needed for public, stateless engine.
+
 - **Ingestion state machine** — checkpoint/resume with `last_checkpoint` (ADR-002)
 - **Chunk fingerprint store** — SHA256 deduplication keys
-- **Learning profiles** (Phase 4) — per-user competency, quiz scores, learning paths
-- Partition key: `/source_type` for content, `/customer_id` for outcomes, `/user_id` for profiles
+- **Anonymous query logs** (optional) — for search quality improvement, no user identity
+- Partition key: `source_type` for state, `fingerprint` prefix for dedup
+- **Cost:** ~$2/month vs. $40-80/month for Cosmos DB Serverless
 
 #### 6.2.3 Azure Cache for Redis — Three-Tier Caching
 
@@ -651,28 +651,28 @@ reference architecture from Azure Architecture Center if applicable.]
 | Resource | SKU / Tier | Purpose | Est. Monthly Cost |
 |---|---|---|---|
 | Azure AI Search | **Basic** (upgrade to S1 at 80% capacity) | Vector + hybrid search for knowledge corpus | ~$75 |
-| Azure Cosmos DB | Serverless | Document store, customer research cache, query logs | ~$40-80 |
+| Azure Table Storage | Standard | Ingestion state machine, chunk fingerprints, anonymous query logs | ~$2 |
 | Azure OpenAI | Standard S0 | Chat (GPT-4.1) + embeddings (`text-embedding-3-large`) via Foundry | ~$35-85 |
 | Azure Container Apps | Consumption | Python app runtime (API + ingestion workers) | ~$35-65 |
 | Azure Cache for Redis | Basic C1 (1 GB) | Query result cache, embedding cache | ~$16 |
-| Azure Key Vault | Standard | Secrets (YouTube, Bing API keys) | ~$1 |
+| Azure Key Vault | Standard | API keys (Bing, YouTube) | ~$1 |
 | Azure Blob Storage | Hot | Raw ingested content, cached responses, generated docs | ~$8-15 |
 | Azure Service Bus | Basic | Dead letter queue for ingestion pipeline | ~$1 |
 | YouTube Data API | Free tier | 10,000 units/day | $0 |
 | Bing Web Search API | S1 | Customer research (1K–10K queries/month) | ~$7-25 |
 | Log Analytics + App Insights | Pay-per-GB | Observability, distributed tracing, RAG metrics | ~$20-35 |
 
-**Phase 1 estimated total:** ~$220-365/month  
-**At scale (S1 upgrade, higher query volume):** ~$420-550/month
+**Phase 1 estimated total:** ~$195-310/month  
+**At scale (S1 upgrade, higher query volume):** ~$350-475/month
 
-> **Cost note (v3.0):** v2.0 estimated $310-365/month using S1 AI Search and missing Azure OpenAI (for embeddings), Redis, Service Bus, and Bing. The revised model starts lower on Basic tier but is more realistic about total infrastructure.
+> **Cost note (v3.1):** Simplified from v3.0 by dropping Cosmos DB ($40-80/mo) in favor of Table Storage (~$2/mo). No auth layer = no user state storage overhead. All data is public — no compliance-driven audit or RBAC costs.
 
 ### 7.2 Resource Group & Naming
 
 ```
 rg-iq-engine-dev
 ├── srch-iq-engine-dev          (Azure AI Search — Basic, upgrade to S1 at 80%)
-├── cosmos-iq-engine-dev        (Cosmos DB — Serverless)
+├── st-iq-state-dev             (Table Storage — ingestion state + fingerprints)
 ├── oai-iq-engine-dev           (Azure OpenAI — chat + embeddings via Foundry)
 ├── ca-iq-engine-dev            (Container App — API)
 ├── ca-iq-ingest-dev            (Container App — ingestion workers)
@@ -686,14 +686,15 @@ rg-iq-engine-dev
 
 ### 7.3 Identity & Security
 
-- **Managed Identity** on both Container Apps → accesses AI Search, Cosmos DB, Key Vault, Blob Storage, Azure OpenAI, Redis, Service Bus
-- **No secrets in code** — YouTube API key, Bing API key all in Key Vault
+- **No authentication required** — 100% public corpus, public web research, no sensitive data. Multi-user, open access.
+- **Managed Identity** on Container Apps → accesses AI Search, Table Storage, Key Vault, Blob Storage, Azure OpenAI, Redis, Service Bus
+- **No secrets in code** — YouTube API key, Bing API key in Key Vault
 - **Azure AI Foundry auth** via `DefaultAzureCredential` (managed identity in production, Azure CLI in dev)
-- **Network:** VNET with private endpoints to AI Search + Cosmos DB + Azure OpenAI (production)
-- **Data classification:** All ingested content is public-domain (MS Learn, blogs, YouTube) — no PII or customer-sensitive data in the corpus itself. Customer research results cached with 90-day TTL.
-- **Customer research RBAC:** Row-level partition isolation per customer engagement; only owning user retrieves their research cache
-- **Audit trail:** Structured logging to Log Analytics — query hashes (not raw text), caller identity, customer context, response status. Required for customer research compliance.
-- **Content Safety gate:** Wired in but disabled for Phase 1 public sources. Required when customer-sourced content enters the pipeline (Phase 2+).
+- **Rate limiting** — IP-based rate limiter on FastAPI to protect Azure OpenAI budget (e.g., 30 queries/min/IP)
+- **Cost guardrails** — Azure Monitor budget alerts at 80%/100%/150% thresholds; Redis caching reduces LLM call volume 30-40%
+- **Network:** Private endpoints to AI Search + Azure OpenAI in production (protect against data exfiltration of API keys, not user data)
+- **Data classification:** All ingested content is public-domain (MS Learn, blogs, YouTube). Customer research is public Bing searches. No PII, no customer-sensitive data, no compliance requirements.
+- **No user profiles, no session persistence** — each query is stateless. Optional browser-local learning state in Phase 4.
 
 ---
 
@@ -1023,19 +1024,19 @@ Each vertical gets a tailored template (not the generic v2.0 template):
 
 ### 17.3 Engagement (v1.1)
 
-**Learning Profile** (Cosmos DB per user)
-- Topics covered, competency tier per topic, quiz scores, learning paths started/completed
-- Time invested, concepts due for spaced repetition review
-- Personalized recommendations: "Based on your profile, you haven't explored Work IQ + Entra integration."
+**Learning State** (browser localStorage — no server-side profiles)
+- Topics covered, quiz scores, learning paths — all stored client-side
+- No login required; user owns their own data
+- Loss on browser clear is acceptable for a public tool
+- Optional: "Export my progress" as JSON download
 
-**Bookmark & Annotate**
-- Pin any response to profile with label + note
-- Saved items searchable; customer research pinned items form a "playbook"
-- Export as structured markdown
+**Bookmark & Export**
+- Pin any response in browser with label + note (localStorage)
+- Export bookmarks + notes as structured markdown
 
-**User Feedback Loop**
-- Thumbs up/down + optional comment per response, linked to `chunk_ids`
-- Negative feedback → flag chunks for review or forced re-crawl
+**Anonymous Feedback Loop**
+- Thumbs up/down per response — stored anonymously in Table Storage
+- Aggregated quality signals for corpus improvement
 - Weekly quality report: top 10 lowest-rated content areas
 
 ---

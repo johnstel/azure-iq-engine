@@ -19,12 +19,12 @@ Built on Azure with a dual-provider AI strategy:
 | **Agent Runtime** | Microsoft Agent Framework (RC) | Multi-agent orchestration, function tools, MCP, A2A |
 | **Chat/Reasoning** | Azure OpenAI via Foundry | GPT-4.1 reasoning, GPT-4o-mini routing |
 | **Embeddings** | Azure OpenAI | `text-embedding-3-large` (1536-dim) |
-| **Document Store** | Azure Cosmos DB (Serverless) | Corpus metadata, customer research, learning profiles |
+| **State Store** | Azure Table Storage | Ingestion state, chunk fingerprints (~$2/mo) |
 | **Cache** | Azure Cache for Redis | Query results, embedding cache, research L1 |
 | **Compute** | Azure Container Apps | FastAPI API + ingestion workers |
 | **Observability** | Application Insights + OpenTelemetry | Distributed tracing, RAG quality metrics |
 
-**Estimated cost:** ~$220-365/month (Phase 1)
+**Estimated cost:** ~$195-310/month (Phase 1) — no auth, public data only
 
 ## Knowledge Corpus
 
@@ -93,7 +93,7 @@ Pre-built IQ-to-pain-point mappings for:
 - **Agent Framework:** Microsoft Agent Framework RC (`agent-framework`)
 - **AI:** Azure OpenAI via Foundry (GPT-4.1, text-embedding-3-large)
 - **Search:** Azure AI Search (hybrid vector + BM25 + semantic reranking)
-- **Storage:** Azure Cosmos DB (Serverless) + Azure Blob Storage
+- **Storage:** Azure Table Storage + Azure Blob Storage
 - **Cache:** Azure Cache for Redis
 - **IaC:** Terraform
 - **CI/CD:** GitHub Actions
