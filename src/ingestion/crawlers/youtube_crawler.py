@@ -105,10 +105,10 @@ class VideoMetadata:
     channel_title: str
     transcript_text: str        # Full concatenated transcript
     transcript_language: str
-    transcript_segments: list[dict[str, Any]] = field(default_factory=list)  # [{text, start, duration}]
     iq_layers: list[str]        # e.g. ["foundry_iq", "fabric_iq"]
     azure_services: list[str]   # e.g. ["Azure OpenAI Service", "Microsoft Fabric"]
     fingerprint: str            # SHA-256(video_id + transcript_text)
+    transcript_segments: list[dict[str, Any]] = field(default_factory=list)  # [{text, start, duration}]
     source_type: str = "video-transcript"
     crawled_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
