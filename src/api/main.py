@@ -287,6 +287,47 @@ async def _search_index(
     return results
 
 
+def _compute_confidence(
+    citations: list["Citation"], answer: str
+) -> float:
+    """
+    Compute a calibrated confidence score (0.0–1.0) based on:
+    - Citation count and quality (relevance scores)
+    - Answer length (very short = hedging)
+    - Hedging language detection
+    """
+    if not citations:
+        return 0.3
+
+    # Factor 1: Top citation score (most important signal)
+    top_score = max(c.relevance_score for c in citations)
+
+    # Factor 2: Number of supporting citations (more = higher confidence)
+    citation_count_factor = min(len(citations) / 5.0, 1.0)
+
+    # Factor 3: Hedging language penalty
+    hedging_phrases = [
+        "i don't have", "not sure", "no information", "cannot find",
+        "unclear", "i'm not able", "outside my knowledge", "no relevant",
+        "i couldn't find", "not enough information",
+    ]
+    answer_lower = answer.lower()
+    hedge_penalty = 0.3 if any(p in answer_lower for p in hedging_phrases) else 0.0
+
+    # Factor 4: Answer substance (very short = low confidence)
+    length_factor = min(len(answer) / 200.0, 1.0)
+
+    # Weighted combination
+    raw = (
+        top_score * 0.40
+        + citation_count_factor * 0.25
+        + length_factor * 0.20
+        + 0.15  # base
+    ) - hedge_penalty
+
+    return round(min(max(raw, 0.1), 0.95), 3)
+
+
 def _results_to_citations(results: list[SearchResult]) -> list[Citation]:
     return [
         Citation(
@@ -746,10 +787,7 @@ async def query_endpoint(req: QueryRequest, request: Request) -> Response:
     # 5 — Derive metadata
     citations = _results_to_citations(results)
     iq_layers = _extract_iq_layers(answer)
-    confidence = min(
-        0.95,
-        sum(c.relevance_score for c in citations) / max(len(citations), 1),
-    ) if citations else 0.4
+    confidence = _compute_confidence(citations, answer)
 
     latency_ms = int((time.monotonic() - t0) * 1000)
 
