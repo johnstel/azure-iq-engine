@@ -366,10 +366,12 @@
 // ─── Markdown renderer (regex-based, no deps) ─────────────────────────────
 function renderMarkdown(text) {
   if (!text) return '';
-  let html = text
+  // Escape HTML first to prevent XSS from LLM content
+  let safe = escHtml(text);
+  let html = safe
     .replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) =>
-      `<pre><code class="${lang || ''}">${escHtml(code.trim())}</code></pre>`)
-    .replace(/`([^`]+)`/g, (_, c) => `<code>${escHtml(c)}</code>`)
+      `<pre><code class="${lang || ''}">${code.trim()}</code></pre>`)
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
     .replace(/^### (.+)$/gm, '<h3>$1</h3>')
     .replace(/^## (.+)$/gm, '<h2>$1</h2>')
     .replace(/^# (.+)$/gm, '<h1>$1</h1>')

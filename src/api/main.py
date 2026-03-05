@@ -215,12 +215,16 @@ async def _search_index(
         f"/docs/search?api-version=2024-07-01"
     )
 
-    # Build OData filter
+    # Build OData filter (sanitise inputs to prevent OData injection)
+    def _sanitise_odata(val: str) -> str:
+        """Strip characters that could break OData filter expressions."""
+        return re.sub(r"[^a-zA-Z0-9_ -]", "", val)[:64]
+
     filters: list[str] = []
     if source_type:
-        filters.append(f"source_type eq '{source_type}'")
+        filters.append(f"source_type eq '{_sanitise_odata(source_type)}'")
     if iq_layer:
-        filters.append(f"iq_layers/any(l: l eq '{iq_layer}')")
+        filters.append(f"iq_layers/any(l: l eq '{_sanitise_odata(iq_layer)}')")
     filter_expr = " and ".join(filters) if filters else None
 
     body: dict[str, Any] = {
@@ -1095,7 +1099,12 @@ async def sources_endpoint() -> SourcesResponse:
 
 # ── Ingestion ─────────────────────────────────────────────────────────────────
 
-@app.post("/api/ingest/run", response_model=IngestJobStatus, tags=["Ingestion"])
+@app.post(
+    "/api/ingest/run",
+    response_model=IngestJobStatus,
+    tags=["Ingestion"],
+    dependencies=[Depends(_require_admin_key)],
+)
 async def ingest_run(req: IngestRunRequest, background_tasks=None) -> IngestJobStatus:
     """
     Trigger an ingestion pipeline run.
