@@ -81,6 +81,7 @@ SOURCE_ROUTING: dict[str, _SourceRoute] = {
     "youtube":        _SourceRoute("video-transcript",   "transcript_text"),
     "azure_updates":  _SourceRoute("azure-update",       "summary"),
     "techcommunity":  _SourceRoute("blog-post",          "body_text"),
+    "azure411":       _SourceRoute("blog-post",          "body_text"),
 }
 
 ALL_SOURCES: list[str] = list(SOURCE_ROUTING.keys())
@@ -354,6 +355,13 @@ class IngestionOrchestrator:
                     return [d.to_index_dict() for d in docs]
 
             return _MSLearnAdapter()
+
+        if source == "azure411":
+            from src.ingestion.crawlers.azure411_crawler import Azure411Crawler
+            return Azure411Crawler(
+                checkpoint_path=checkpoint_dir / "azure411_checkpoint.json",
+                full_refresh=force,
+            )
 
         # Should never reach here — validated in __init__
         raise ValueError(f"No crawler registered for source '{source}'")
