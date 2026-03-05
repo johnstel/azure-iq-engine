@@ -389,6 +389,16 @@ function escHtml(s) {
   return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+function fixSourceUrl(url) {
+  if (!url || url === '#') return '#';
+  if (url.startsWith('http://') || url.startsWith('https://')) return url;
+  // Bare YouTube video ID (11 chars, alphanumeric + dash/underscore)
+  if (/^[A-Za-z0-9_-]{10,12}$/.test(url)) return `https://www.youtube.com/watch?v=${url}`;
+  // Bare MS Learn path
+  if (url.startsWith('/')) return `https://learn.microsoft.com${url}`;
+  return url;
+}
+
 // ─── Theme ──────────────────────────────────────────────────────────────────
 const THEME_KEY = 'iq-engine-theme';
 const HISTORY_KEY = 'iq-engine-chat-history';
@@ -602,7 +612,7 @@ function _renderAssistantBubble(data, agent, elapsed) {
       const pct = c.relevance_score != null ? Math.round(c.relevance_score * 100) : (c.score != null ? Math.round(c.score * 100) : null);
       const cls = pct != null ? (pct >= 80 ? 'high' : pct >= 60 ? 'mid' : '') : '';
       const scoreLabel = pct != null ? `${pct}%` : '';
-      const url = c.source_url || c.url || '#';
+      const url = fixSourceUrl(c.source_url || c.url || '#');
       const title = escHtml(c.title || url);
       return `<div class="citation-item"><a href="${escHtml(url)}" target="_blank" rel="noopener" title="${title}">${title}</a>${scoreLabel ? `<span class="relevance ${cls}">${scoreLabel}</span>` : ''}</div>`;
     }).join('');
@@ -730,7 +740,7 @@ function renderResearchResult(data, company) {
   if (data.citations && data.citations.length) {
     html += `<div class="research-section"><h4>Sources (${data.citations.length})</h4>`;
     for (const c of data.citations) {
-      const url = c.source_url || '#';
+      const url = fixSourceUrl(c.source_url || '#');
       html += `<div class="citation-item"><a href="${escHtml(url)}" target="_blank">${escHtml(c.title || url)}</a></div>`;
     }
     html += `</div>`;
@@ -788,7 +798,7 @@ async function doExploreSearch() {
       const iqTag = r.iq_layer ? `<span class="msg-agent-tag">${escHtml(r.iq_layer)}</span>` : '';
       html += `<div style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius);padding:12px;margin-bottom:8px;">
         <div style="display:flex;justify-content:space-between;align-items:start;gap:8px;margin-bottom:4px;">
-          <a href="${escHtml(r.source_url || '#')}" target="_blank" style="color:var(--blue-light);font-size:13px;font-weight:600;text-decoration:none;">${escHtml(r.title || 'Untitled')}</a>
+          <a href="${escHtml(fixSourceUrl(r.source_url || '#'))}" target="_blank" style="color:var(--blue-light);font-size:13px;font-weight:600;text-decoration:none;">${escHtml(r.title || 'Untitled')}</a>
           ${score}
         </div>
         <p style="font-size:12px;color:var(--text-dim);margin-bottom:6px;line-height:1.5;">${escHtml((r.snippet || '').substring(0, 300))}${(r.snippet || '').length > 300 ? '…' : ''}</p>
