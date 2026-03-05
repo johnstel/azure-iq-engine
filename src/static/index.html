@@ -1,0 +1,553 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Azure IQ Engine</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #1e1e1e; --bg2: #252526; --bg3: #2d2d30; --bg4: #3c3c3c;
+    --blue: #0078d4; --blue-hover: #106ebe; --blue-light: #1a9fff;
+    --text: #e8e8e8; --text-dim: #a0a0a0; --text-muted: #6e6e6e;
+    --border: #3c3c3c; --success: #107c10; --error: #d13438;
+    --radius: 8px; --radius-lg: 12px;
+  }
+  html, body { height: 100%; background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; font-size: 14px; line-height: 1.5; }
+
+  /* Layout */
+  .app { display: flex; flex-direction: column; height: 100vh; max-width: 900px; margin: 0 auto; }
+
+  /* Header */
+  header { padding: 12px 20px; background: var(--bg2); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+  .header-logo { width: 32px; height: 32px; background: var(--blue); border-radius: 6px; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 14px; color: #fff; flex-shrink: 0; }
+  .header-text h1 { font-size: 16px; font-weight: 600; color: #fff; }
+  .header-text p { font-size: 11px; color: var(--text-dim); }
+  .version-badge { margin-left: auto; background: var(--bg3); color: var(--text-dim); padding: 3px 8px; border-radius: 20px; font-size: 11px; border: 1px solid var(--border); }
+
+  /* Tabs */
+  .tabs { display: flex; background: var(--bg2); border-bottom: 1px solid var(--border); padding: 0 20px; flex-shrink: 0; }
+  .tab { padding: 10px 16px; cursor: pointer; font-size: 13px; color: var(--text-dim); border-bottom: 2px solid transparent; transition: all .15s; }
+  .tab:hover { color: var(--text); }
+  .tab.active { color: var(--blue-light); border-bottom-color: var(--blue); }
+
+  /* Quick actions */
+  .quick-actions { display: flex; gap: 8px; padding: 10px 20px; background: var(--bg2); border-bottom: 1px solid var(--border); flex-wrap: wrap; flex-shrink: 0; }
+  .quick-btn { background: var(--bg3); border: 1px solid var(--border); color: var(--text-dim); padding: 4px 10px; border-radius: 20px; font-size: 12px; cursor: pointer; transition: all .15s; white-space: nowrap; }
+  .quick-btn:hover { border-color: var(--blue); color: var(--blue-light); }
+
+  /* Main content */
+  .content { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
+
+  /* Ask panel */
+  #ask-panel { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
+  .chat-history { flex: 1; overflow-y: auto; padding: 16px 20px; display: flex; flex-direction: column; gap: 12px; }
+  .chat-history::-webkit-scrollbar { width: 6px; }
+  .chat-history::-webkit-scrollbar-thumb { background: var(--bg4); border-radius: 3px; }
+
+  /* Messages */
+  .msg { display: flex; flex-direction: column; max-width: 88%; }
+  .msg.user { align-self: flex-end; align-items: flex-end; }
+  .msg.assistant { align-self: flex-start; align-items: flex-start; }
+  .msg-bubble { padding: 10px 14px; border-radius: var(--radius-lg); font-size: 13px; line-height: 1.6; }
+  .msg.user .msg-bubble { background: var(--blue); color: #fff; border-bottom-right-radius: 3px; }
+  .msg.assistant .msg-bubble { background: var(--bg3); color: var(--text); border-bottom-left-radius: 3px; border: 1px solid var(--border); }
+  .msg-meta { font-size: 11px; color: var(--text-muted); margin-top: 4px; display: flex; gap: 10px; }
+  .msg-agent-tag { background: var(--bg4); padding: 1px 6px; border-radius: 10px; font-size: 10px; color: var(--text-dim); }
+
+  /* Markdown rendering */
+  .md h1,.md h2,.md h3 { color: #fff; margin: 8px 0 4px; font-weight: 600; }
+  .md h1 { font-size: 16px; } .md h2 { font-size: 15px; } .md h3 { font-size: 14px; }
+  .md p { margin: 4px 0; }
+  .md strong { color: #fff; font-weight: 600; }
+  .md em { color: #c8c8c8; font-style: italic; }
+  .md code { background: rgba(0,0,0,.4); padding: 1px 5px; border-radius: 3px; font-family: 'Cascadia Code','Consolas',monospace; font-size: 12px; color: #ce9178; }
+  .md pre { background: rgba(0,0,0,.5); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; margin: 8px 0; overflow-x: auto; }
+  .md pre code { background: none; padding: 0; color: #d4d4d4; font-size: 12px; }
+  .md ul,.md ol { padding-left: 18px; margin: 4px 0; }
+  .md li { margin: 2px 0; }
+  .md a { color: var(--blue-light); text-decoration: none; } .md a:hover { text-decoration: underline; }
+  .md hr { border: none; border-top: 1px solid var(--border); margin: 10px 0; }
+
+  /* Citations */
+  .citations { margin-top: 8px; }
+  .citations-toggle { font-size: 11px; color: var(--text-muted); cursor: pointer; display: flex; align-items: center; gap: 4px; background: none; border: none; padding: 0; }
+  .citations-toggle:hover { color: var(--blue-light); }
+  .citations-toggle::before { content: '▶'; font-size: 9px; transition: transform .15s; }
+  .citations-toggle.open::before { transform: rotate(90deg); }
+  .citations-list { display: none; margin-top: 6px; display: flex; flex-direction: column; gap: 4px; }
+  .citations-list.visible { display: flex; }
+  .citation-item { background: var(--bg2); border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; font-size: 11px; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  .citation-item a { color: var(--blue-light); text-decoration: none; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .citation-item a:hover { text-decoration: underline; }
+  .relevance { color: var(--text-muted); background: var(--bg3); padding: 1px 6px; border-radius: 10px; font-size: 10px; flex-shrink: 0; }
+  .relevance.high { color: #4ec9b0; }
+  .relevance.mid { color: #dcdcaa; }
+
+  /* Typing indicator */
+  .typing { display: flex; align-items: center; gap: 8px; padding: 10px 14px; background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius-lg); border-bottom-left-radius: 3px; align-self: flex-start; font-size: 12px; color: var(--text-dim); }
+  .dots { display: flex; gap: 4px; }
+  .dots span { width: 6px; height: 6px; background: var(--text-muted); border-radius: 50%; animation: bounce .8s infinite; }
+  .dots span:nth-child(2) { animation-delay: .15s; }
+  .dots span:nth-child(3) { animation-delay: .3s; }
+  @keyframes bounce { 0%,60%,100%{transform:translateY(0)} 30%{transform:translateY(-5px)} }
+
+  /* Input area */
+  .input-area { padding: 12px 20px; background: var(--bg2); border-top: 1px solid var(--border); flex-shrink: 0; }
+  .input-controls { display: flex; gap: 8px; margin-bottom: 8px; align-items: center; }
+  .agent-select { background: var(--bg3); border: 1px solid var(--border); color: var(--text); padding: 5px 8px; border-radius: var(--radius); font-size: 12px; cursor: pointer; flex: 1; max-width: 200px; }
+  .agent-select:focus { outline: none; border-color: var(--blue); }
+  .input-row { display: flex; gap: 8px; }
+  .msg-input { flex: 1; background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); padding: 8px 12px; font-size: 13px; font-family: inherit; resize: none; min-height: 38px; max-height: 120px; transition: border-color .15s; }
+  .msg-input:focus { outline: none; border-color: var(--blue); }
+  .msg-input::placeholder { color: var(--text-muted); }
+  .send-btn { background: var(--blue); border: none; color: #fff; padding: 8px 16px; border-radius: var(--radius); font-size: 13px; font-weight: 600; cursor: pointer; transition: background .15s; white-space: nowrap; }
+  .send-btn:hover { background: var(--blue-hover); }
+  .send-btn:disabled { background: var(--bg4); color: var(--text-muted); cursor: not-allowed; }
+
+  /* Research panel */
+  #research-panel { display: none; flex-direction: column; flex: 1; overflow: hidden; padding: 20px; gap: 16px; overflow-y: auto; }
+  #research-panel.active { display: flex; }
+  .research-form { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 20px; display: flex; flex-direction: column; gap: 14px; }
+  .research-form h2 { font-size: 15px; color: #fff; margin-bottom: 4px; }
+  .form-group { display: flex; flex-direction: column; gap: 6px; }
+  .form-group label { font-size: 12px; color: var(--text-dim); font-weight: 500; }
+  .form-input { background: var(--bg3); border: 1px solid var(--border); color: var(--text); padding: 8px 12px; border-radius: var(--radius); font-size: 13px; font-family: inherit; }
+  .form-input:focus { outline: none; border-color: var(--blue); }
+  .form-select { background: var(--bg3); border: 1px solid var(--border); color: var(--text); padding: 8px 12px; border-radius: var(--radius); font-size: 13px; cursor: pointer; }
+  .form-select:focus { outline: none; border-color: var(--blue); }
+  .checkbox-group { display: flex; flex-wrap: wrap; gap: 8px; }
+  .checkbox-label { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-dim); cursor: pointer; background: var(--bg3); padding: 4px 10px; border-radius: 20px; border: 1px solid var(--border); transition: all .15s; }
+  .checkbox-label:hover { border-color: var(--blue); color: var(--text); }
+  .checkbox-label input[type="checkbox"] { accent-color: var(--blue); }
+  .research-btn { background: var(--blue); border: none; color: #fff; padding: 10px 24px; border-radius: var(--radius); font-size: 13px; font-weight: 600; cursor: pointer; align-self: flex-start; transition: background .15s; }
+  .research-btn:hover { background: var(--blue-hover); }
+  .research-btn:disabled { background: var(--bg4); color: var(--text-muted); cursor: not-allowed; }
+  .research-result { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 20px; }
+  .research-result h3 { font-size: 14px; color: var(--blue-light); margin-bottom: 12px; }
+
+  /* Error & empty states */
+  .error-msg { background: rgba(209,52,56,.15); border: 1px solid rgba(209,52,56,.4); color: #f87171; padding: 10px 14px; border-radius: var(--radius); font-size: 12px; align-self: flex-start; max-width: 88%; }
+  .empty-state { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--text-muted); gap: 8px; text-align: center; padding: 40px; }
+  .empty-state .icon { font-size: 40px; opacity: .4; }
+  .empty-state p { font-size: 13px; }
+
+  /* Footer */
+  footer { padding: 8px 20px; background: var(--bg2); border-top: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; gap: 8px; flex-wrap: wrap; }
+  footer span { font-size: 11px; color: var(--text-muted); }
+  #source-stats { font-size: 11px; color: var(--text-muted); }
+
+  /* Responsive */
+  @media (max-width: 600px) {
+    header { padding: 10px 14px; }
+    .quick-actions { padding: 8px 14px; }
+    .chat-history { padding: 12px 14px; }
+    .input-area { padding: 10px 14px; }
+    .input-controls { flex-wrap: wrap; }
+    .agent-select { max-width: 100%; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- Header -->
+  <header>
+    <div class="header-logo">IQ</div>
+    <div class="header-text">
+      <h1>Azure IQ Engine</h1>
+      <p>Unified Knowledge for Work IQ · Fabric IQ · Foundry IQ</p>
+    </div>
+    <span class="version-badge">v0.1.0 MVP</span>
+  </header>
+
+  <!-- Tabs -->
+  <div class="tabs">
+    <div class="tab active" data-tab="ask">💬 Ask</div>
+    <div class="tab" data-tab="research">🔍 Research</div>
+  </div>
+
+  <!-- Quick actions -->
+  <div class="quick-actions">
+    <button class="quick-btn" data-fill="What's new this week in Microsoft IQ?">⚡ What's new this week?</button>
+    <button class="quick-btn" data-fill="Compare Microsoft IQ vs competitors — key differentiators?">⚖️ Compare vs competitors</button>
+    <button class="quick-btn" data-fill="Explain the Fabric IQ ontology and data model">🧩 Explain Fabric IQ ontology</button>
+    <button class="quick-btn" data-research>🏢 Research a company</button>
+  </div>
+
+  <!-- Main content -->
+  <div class="content">
+
+    <!-- Ask panel -->
+    <div id="ask-panel">
+      <div class="chat-history" id="chat-history">
+        <div class="empty-state" id="empty-state">
+          <div class="icon">🧠</div>
+          <p>Ask anything about Microsoft IQ — Work IQ, Fabric IQ, or Foundry IQ.</p>
+          <p style="font-size:12px;">Use quick actions above or type your question below.</p>
+        </div>
+      </div>
+      <div class="input-area">
+        <div class="input-controls">
+          <select class="agent-select" id="agent-select">
+            <option value="auto">🤖 Auto (recommended)</option>
+            <option value="iq_architect">🏗️ IQ Architect</option>
+            <option value="azure_navigator">🗺️ Azure Navigator</option>
+            <option value="story_weaver">📖 Story Weaver</option>
+            <option value="latest_updates">📰 Latest Updates</option>
+            <option value="competitive_context">⚖️ Competitive Context</option>
+          </select>
+        </div>
+        <div class="input-row">
+          <textarea class="msg-input" id="msg-input" placeholder="Ask about Microsoft IQ, Fabric IQ, Foundry IQ…" rows="1"></textarea>
+          <button class="send-btn" id="send-btn">Send</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Research panel -->
+    <div id="research-panel">
+      <div class="research-form">
+        <h2>🏢 Company Research</h2>
+        <p style="font-size:12px;color:var(--text-dim)">Analyze a company through the Microsoft IQ lens — identify strategic fit, use cases, and relevant IQ capabilities.</p>
+        <div class="form-group">
+          <label>Company Name *</label>
+          <input type="text" class="form-input" id="company-name" placeholder="e.g. Contoso Energy, Fabrikam Inc.">
+        </div>
+        <div class="form-group">
+          <label>Industry</label>
+          <select class="form-select" id="company-industry">
+            <option value="">— Any —</option>
+            <option value="energy">Energy & Utilities</option>
+            <option value="finance">Financial Services</option>
+            <option value="healthcare">Healthcare & Life Sciences</option>
+            <option value="manufacturing">Manufacturing</option>
+            <option value="retail">Retail & Consumer</option>
+            <option value="government">Government & Public Sector</option>
+            <option value="technology">Technology</option>
+            <option value="other">Other</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Focus Areas</label>
+          <div class="checkbox-group">
+            <label class="checkbox-label"><input type="checkbox" value="work_iq"> Work IQ</label>
+            <label class="checkbox-label"><input type="checkbox" value="fabric_iq"> Fabric IQ</label>
+            <label class="checkbox-label"><input type="checkbox" value="foundry_iq"> Foundry IQ</label>
+            <label class="checkbox-label"><input type="checkbox" value="competitive"> Competitive Landscape</label>
+            <label class="checkbox-label"><input type="checkbox" value="use_cases"> Use Cases</label>
+          </div>
+        </div>
+        <button class="research-btn" id="research-btn">🔍 Research Company</button>
+      </div>
+      <div class="research-result" id="research-result" style="display:none">
+        <h3 id="research-result-title"></h3>
+        <div class="md" id="research-result-content"></div>
+      </div>
+    </div>
+
+  </div><!-- /.content -->
+
+  <!-- Footer -->
+  <footer>
+    <span id="source-stats">Loading source stats…</span>
+    <span>Built on Microsoft Agent Framework + Azure AI Foundry</span>
+  </footer>
+
+</div><!-- /.app -->
+
+<script>
+// ─── Markdown renderer (regex-based, no deps) ─────────────────────────────
+function renderMarkdown(text) {
+  if (!text) return '';
+  let html = text
+    // Code blocks (fenced)
+    .replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) =>
+      `<pre><code class="${lang || ''}">${escHtml(code.trim())}</code></pre>`)
+    // Inline code
+    .replace(/`([^`]+)`/g, (_, c) => `<code>${escHtml(c)}</code>`)
+    // Headings
+    .replace(/^### (.+)$/gm, '<h3>$1</h3>')
+    .replace(/^## (.+)$/gm, '<h2>$1</h2>')
+    .replace(/^# (.+)$/gm, '<h1>$1</h1>')
+    // Bold & italic
+    .replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>')
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g, '<em>$1</em>')
+    // HR
+    .replace(/^---$/gm, '<hr>')
+    // Unordered list
+    .replace(/^\s*[-*] (.+)$/gm, '<li>$1</li>')
+    .replace(/(<li>.*<\/li>\n?)+/g, m => `<ul>${m}</ul>`)
+    // Ordered list
+    .replace(/^\d+\. (.+)$/gm, '<li>$1</li>')
+    // Links
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
+    // Paragraphs (double newline)
+    .replace(/\n\n+/g, '</p><p>')
+    // Line breaks
+    .replace(/\n/g, '<br>');
+  return `<p>${html}</p>`;
+}
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ─── State ─────────────────────────────────────────────────────────────────
+let isLoading = false;
+let currentTab = 'ask';
+
+// ─── DOM refs ───────────────────────────────────────────────────────────────
+const chatHistory   = document.getElementById('chat-history');
+const emptyState    = document.getElementById('empty-state');
+const msgInput      = document.getElementById('msg-input');
+const sendBtn       = document.getElementById('send-btn');
+const agentSelect   = document.getElementById('agent-select');
+const askPanel      = document.getElementById('ask-panel');
+const researchPanel = document.getElementById('research-panel');
+const sourceStats   = document.getElementById('source-stats');
+
+// ─── Tabs ───────────────────────────────────────────────────────────────────
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    currentTab = tab.dataset.tab;
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+    if (currentTab === 'ask') {
+      askPanel.style.display = 'flex';
+      researchPanel.classList.remove('active');
+    } else {
+      askPanel.style.display = 'none';
+      researchPanel.classList.add('active');
+    }
+  });
+});
+
+// ─── Quick actions ──────────────────────────────────────────────────────────
+document.querySelectorAll('.quick-btn[data-fill]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    switchToAsk();
+    msgInput.value = btn.dataset.fill;
+    autoResizeInput();
+    msgInput.focus();
+  });
+});
+document.querySelectorAll('.quick-btn[data-research]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelector('.tab[data-tab="research"]').click();
+    document.getElementById('company-name').focus();
+  });
+});
+
+function switchToAsk() {
+  document.querySelector('.tab[data-tab="ask"]').click();
+}
+
+// ─── Auto-resize textarea ───────────────────────────────────────────────────
+function autoResizeInput() {
+  msgInput.style.height = 'auto';
+  msgInput.style.height = Math.min(msgInput.scrollHeight, 120) + 'px';
+}
+msgInput.addEventListener('input', autoResizeInput);
+
+// ─── Send on Enter (Shift+Enter = newline) ──────────────────────────────────
+msgInput.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+});
+sendBtn.addEventListener('click', sendMessage);
+
+// ─── Send message ───────────────────────────────────────────────────────────
+async function sendMessage() {
+  const text = msgInput.value.trim();
+  if (!text || isLoading) return;
+
+  hideEmptyState();
+  appendUserMessage(text);
+  msgInput.value = '';
+  autoResizeInput();
+
+  const agent = agentSelect.value;
+  const typingEl = appendTyping();
+  setLoading(true);
+
+  const t0 = Date.now();
+  try {
+    const res = await fetch('/api/query', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question: text, agent: agent === 'auto' ? null : agent })
+    });
+    const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
+
+    if (!res.ok) {
+      const err = await res.text().catch(() => 'Unknown error');
+      removeEl(typingEl);
+      appendError(`API error ${res.status}: ${err}`);
+    } else {
+      const data = await res.json();
+      removeEl(typingEl);
+      appendAssistantMessage(data, agent, elapsed);
+    }
+  } catch (err) {
+    removeEl(typingEl);
+    appendError(`Connection error: ${err.message}. Is the backend running?`);
+  } finally {
+    setLoading(false);
+  }
+}
+
+// ─── Append messages ────────────────────────────────────────────────────────
+function appendUserMessage(text) {
+  const div = document.createElement('div');
+  div.className = 'msg user';
+  div.innerHTML = `<div class="msg-bubble">${escHtml(text)}</div>`;
+  chatHistory.appendChild(div);
+  scrollBottom();
+}
+
+function appendAssistantMessage(data, agent, elapsed) {
+  const content = data.answer || data.response || data.content || JSON.stringify(data);
+  const citations = data.citations || data.sources || [];
+  const tokens = data.tokens_used || data.token_count || null;
+  const agentUsed = data.agent_used || data.agent || (agent !== 'auto' ? agent : null);
+
+  const div = document.createElement('div');
+  div.className = 'msg assistant';
+
+  let metaHtml = `<span>${elapsed}s</span>`;
+  if (tokens) metaHtml += `<span>${tokens} tokens</span>`;
+  if (agentUsed && agentUsed !== 'auto') metaHtml += `<span class="msg-agent-tag">${agentUsed.replace(/_/g,' ')}</span>`;
+
+  let citationsHtml = '';
+  if (citations.length > 0) {
+    const items = citations.map(c => {
+      const pct = c.score != null ? Math.round(c.score * 100) : (c.relevance_score != null ? Math.round(c.relevance_score * 100) : null);
+      const cls = pct != null ? (pct >= 80 ? 'high' : pct >= 60 ? 'mid' : '') : '';
+      const scoreLabel = pct != null ? `${pct}%` : '';
+      const url = c.source_url || c.url || '#';
+      const title = escHtml(c.title || c.source || url);
+      return `<div class="citation-item"><a href="${escHtml(url)}" target="_blank" rel="noopener" title="${title}">${title}</a>${scoreLabel ? `<span class="relevance ${cls}">${scoreLabel}</span>` : ''}</div>`;
+    }).join('');
+    citationsHtml = `
+      <div class="citations">
+        <button class="citations-toggle" onclick="toggleCitations(this)">${citations.length} source${citations.length !== 1 ? 's' : ''}</button>
+        <div class="citations-list">${items}</div>
+      </div>`;
+  }
+
+  div.innerHTML = `
+    <div class="msg-bubble">
+      <div class="md">${renderMarkdown(content)}</div>
+      ${citationsHtml}
+    </div>
+    <div class="msg-meta">${metaHtml}</div>`;
+  chatHistory.appendChild(div);
+  scrollBottom();
+}
+
+function appendTyping() {
+  const div = document.createElement('div');
+  div.className = 'typing';
+  div.innerHTML = `<div class="dots"><span></span><span></span><span></span></div> Thinking…`;
+  chatHistory.appendChild(div);
+  scrollBottom();
+  return div;
+}
+
+function appendError(msg) {
+  const div = document.createElement('div');
+  div.className = 'error-msg';
+  div.textContent = '⚠️ ' + msg;
+  chatHistory.appendChild(div);
+  scrollBottom();
+}
+
+function toggleCitations(btn) {
+  btn.classList.toggle('open');
+  const list = btn.nextElementSibling;
+  list.classList.toggle('visible');
+}
+
+// ─── Research ───────────────────────────────────────────────────────────────
+document.getElementById('research-btn').addEventListener('click', async () => {
+  const company = document.getElementById('company-name').value.trim();
+  if (!company) { document.getElementById('company-name').focus(); return; }
+
+  const industry = document.getElementById('company-industry').value;
+  const focusAreas = Array.from(document.querySelectorAll('.checkbox-group input:checked')).map(c => c.value);
+
+  const btn = document.getElementById('research-btn');
+  const resultEl = document.getElementById('research-result');
+  const titleEl = document.getElementById('research-result-title');
+  const contentEl = document.getElementById('research-result-content');
+
+  btn.disabled = true;
+  btn.textContent = '⏳ Researching…';
+  resultEl.style.display = 'none';
+
+  try {
+    const res = await fetch('/api/research', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ company, industry: industry || null, focus_areas: focusAreas })
+    });
+    if (!res.ok) {
+      const err = await res.text().catch(() => 'Unknown error');
+      alert(`Research error ${res.status}: ${err}`);
+    } else {
+      const data = await res.json();
+      const content = data.analysis || data.result || data.content || JSON.stringify(data, null, 2);
+      titleEl.textContent = `Research: ${company}`;
+      contentEl.innerHTML = renderMarkdown(content);
+      resultEl.style.display = 'block';
+      resultEl.scrollIntoView({ behavior: 'smooth' });
+    }
+  } catch (err) {
+    alert(`Connection error: ${err.message}. Is the backend running?`);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '🔍 Research Company';
+  }
+});
+
+// ─── Source stats ───────────────────────────────────────────────────────────
+async function loadSourceStats() {
+  try {
+    const res = await fetch('/api/sources');
+    if (!res.ok) return;
+    const data = await res.json();
+    const total = data.total_documents || data.total || null;
+    const breakdown = data.by_source || data.sources || null;
+    let text = 'Powered by';
+    if (total) text += ` ${total.toLocaleString()} documents`;
+    if (breakdown) {
+      const parts = Object.entries(breakdown).map(([k, v]) => `${v.toLocaleString()} from ${k}`);
+      if (parts.length) text += ` (${parts.join(', ')})`;
+    } else if (!total) {
+      text += ' MS Learn, YouTube, Azure Updates, Tech Community';
+    }
+    sourceStats.textContent = text;
+  } catch {
+    sourceStats.textContent = 'Powered by MS Learn · YouTube · Azure Updates · Tech Community';
+  }
+}
+loadSourceStats();
+
+// ─── Helpers ────────────────────────────────────────────────────────────────
+function hideEmptyState() {
+  if (emptyState) emptyState.remove();
+}
+function setLoading(val) {
+  isLoading = val;
+  sendBtn.disabled = val;
+  sendBtn.textContent = val ? '…' : 'Send';
+}
+function scrollBottom() {
+  chatHistory.scrollTop = chatHistory.scrollHeight;
+}
+function removeEl(el) {
+  if (el && el.parentNode) el.parentNode.removeChild(el);
+}
+</script>
+</body>
+</html>

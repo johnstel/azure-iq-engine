@@ -1,0 +1,13 @@
+__pycache__
+*.pyc
+.git
+.github
+docs
+infra
+*.md
+.env
+.env.*
+checkpoints/
+.generated/
+.pytest_cache
+.mypy_cache
