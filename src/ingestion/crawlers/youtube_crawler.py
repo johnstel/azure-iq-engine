@@ -191,15 +191,18 @@ async def _fetch_transcript(video_id: str) -> tuple[str, str]:
     Falls back to empty string on failure (transcript not available, disabled, etc.).
     """
     try:
-        from youtube_transcript_api import YouTubeTranscriptApi, NoTranscriptFound, TranscriptsDisabled  # type: ignore
+        from youtube_transcript_api import YouTubeTranscriptApi  # type: ignore
 
         loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(
-            None,
-            lambda: YouTubeTranscriptApi.get_transcript(video_id, languages=["en", "en-US", "en-GB"]),
-        )
-        text = " ".join(entry["text"] for entry in result)
-        return text, "en"
+
+        def _fetch() -> tuple[str, str]:
+            api = YouTubeTranscriptApi()
+            transcript = api.fetch(video_id, languages=["en", "en-US", "en-GB"])
+            text = " ".join(snippet.text for snippet in transcript.snippets)
+            return text, transcript.language_code or "en"
+
+        text, lang = await loop.run_in_executor(None, _fetch)
+        return text, lang
 
     except ImportError:
         logger.error("youtube-transcript-api not installed — pip install youtube-transcript-api")
