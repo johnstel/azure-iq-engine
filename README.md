@@ -1,5 +1,7 @@
 # Azure IQ Engine
 
+[![CI/CD](https://github.com/johnstel/azure-iq-engine/actions/workflows/deploy.yml/badge.svg)](https://github.com/johnstel/azure-iq-engine/actions/workflows/deploy.yml)
+
 **Microsoft IQ & Azure Intelligence Engine** — A Python-based knowledge application that unifies Microsoft's IQ layers (Work IQ, Fabric IQ, Foundry IQ) and Azure services into a query engine with natural language Q&A, technical story weaving, and customer outcome document generation.
 
 ## What It Does
