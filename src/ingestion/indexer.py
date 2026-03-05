@@ -32,7 +32,7 @@ _DEDUP_PAGE_SIZE = 1000       # fingerprint fetch page size
 _MAX_RETRIES = 1              # single retry for persistent failures
 
 # Fields that contain multi-value string collections in the AI Search schema
-_COLLECTION_FIELDS = {"iq_layers", "azure_services"}
+_COLLECTION_FIELDS = {"iq_layers", "azure_services", "capabilities", "entities", "target_roles", "certification_tags"}
 
 # The special "@search.action" key required by AI Search batch upload
 _MERGE_OR_UPLOAD = "mergeOrUpload"

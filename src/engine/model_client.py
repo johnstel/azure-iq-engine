@@ -30,7 +30,7 @@ def get_foundry_client():
 def get_embedding_client():
     """
     Create an Azure OpenAI client for embedding generation.
-    Uses text-embedding-3-large (1536-dim).
+    Uses text-embedding-3-large (3072-dim).
     """
     from openai import AsyncAzureOpenAI
 

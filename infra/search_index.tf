@@ -211,13 +211,13 @@ locals {
         facetable   = false
         retrievable = true
       },
-      # ── Embedding vector (text-embedding-ada-002 = 1536 dims) ────────────
+      # ── Embedding vector (text-embedding-3-large = 3072 dims) ────────────
       {
         name       = "embedding"
         type       = "Collection(Edm.Single)"
         searchable = true
         retrievable = false
-        dimensions  = 1536
+        dimensions  = 3072
         vectorSearchProfile = "iq-hnsw-profile"
       }
     ]

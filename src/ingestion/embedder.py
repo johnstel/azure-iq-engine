@@ -2,7 +2,7 @@
 Embedding Pipeline (ADR-004).
 
 Generates embeddings for document chunks via Azure OpenAI (Foundry endpoint).
-Model: text-embedding-3-large (1536 dimensions, 8191 token max input).
+Model: text-embedding-3-large (3072 dimensions, 8191 token max input).
 
 Features:
 - Batched requests (16 inputs/call, Azure OpenAI limit)
@@ -39,7 +39,7 @@ _BATCH_SIZE = 16                     # Azure OpenAI embeddings API hard limit
 _MAX_CONCURRENT_CALLS = 5
 _COST_PER_1K_TOKENS = 0.00013        # USD, text-embedding-3-large
 _CHECKPOINT_INTERVAL = 100           # chunks between checkpoint saves
-_EMBEDDING_DIMENSIONS = 1536
+_EMBEDDING_DIMENSIONS = 3072
 
 _BACKOFF_BASE = 1.0                  # seconds
 _BACKOFF_MAX = 60.0
@@ -91,7 +91,7 @@ class EmbeddingPipeline:
         pipeline = EmbeddingPipeline()
         embedded_chunks = await pipeline.embed_chunks(chunks)
 
-    Each chunk dict receives an ``embedding`` key (list of 1536 floats).
+    Each chunk dict receives an ``embedding`` key (list of 3072 floats).
     Chunks that cannot be embedded (API failure) retain ``embedding = None``.
     """
 
