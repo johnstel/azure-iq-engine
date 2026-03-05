@@ -2,6 +2,25 @@
 
 All notable changes to Azure IQ Engine will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- **`src/ingestion/index_manager.py`**: Python module to provision the
+  `iq-engine-index` on Azure AI Search using the `azure-search-documents` SDK.
+  Implements the full schema from `infra/search_index.tf`:
+  - 19 text/metadata fields (filterable, facetable, and sortable as defined)
+  - 1536-dimension HNSW vector field (`embedding`, cosine metric)
+  - Semantic configuration (`iq-semantic`): title → content → keyword fields
+  - Idempotent `create_or_update_index` upsert — safe to re-run
+  - CLI entry-point: `python -m src.ingestion.index_manager [--delete]`
+
+### Fixed
+- **`src/api/settings.py`**: Default `search_index_name` corrected from
+  `iq-corpus` to `iq-engine-index` to match `indexer.py` and the issue spec.
+- **`src/ingestion/indexer.py`**: `_COLLECTION_FIELDS` extended to cover all
+  `Collection(Edm.String)` fields in the schema (`capabilities`, `entities`,
+  `target_roles`, `certification_tags`).
+
 ## [0.1.0] - 2026-03-04
 
 ### Added

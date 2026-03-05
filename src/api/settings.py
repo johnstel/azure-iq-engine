@@ -56,7 +56,7 @@ class Settings(BaseSettings):
         description="Azure AI Search admin key (SEARCH_API_KEY)",
     )
     search_index_name: str = Field(
-        default="iq-corpus",
+        default="iq-engine-index",
         description="Name of the primary search index",
     )
     search_top_k: int = Field(
