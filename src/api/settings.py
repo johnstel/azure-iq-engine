@@ -20,7 +20,7 @@ class Settings(BaseSettings):
 
     # ── App ─────────────────────────────────────────────────────────────────
     app_name: str = "Azure IQ Engine"
-    app_version: str = "0.1.0"
+    app_version: str = "0.3.0"
     app_description: str = (
         "Grounded AI Q&A over the Microsoft IQ layer stack — "
         "Work IQ, Fabric IQ, and Foundry IQ — powered by Azure AI Foundry "

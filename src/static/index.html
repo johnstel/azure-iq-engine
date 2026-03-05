@@ -23,6 +23,14 @@
     --text: #1b1b1b; --text-dim: #4a4a4a; --text-muted: #767676;
     --border: #cccccc; --success: #107c10; --error: #d13438;
   }
+  [data-theme="light"] .md h1,[data-theme="light"] .md h2,[data-theme="light"] .md h3 { color: var(--text); }
+  [data-theme="light"] .md strong { color: var(--text); }
+  [data-theme="light"] .md em { color: var(--text-dim); }
+  [data-theme="light"] .md code { background: rgba(0,0,0,.08); color: #a31515; }
+  [data-theme="light"] .md pre { background: rgba(0,0,0,.06); }
+  [data-theme="light"] .md pre code { color: #1b1b1b; }
+  [data-theme="light"] .header-text h1 { color: var(--text); }
+
   html, body { height: 100%; background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; font-size: 14px; line-height: 1.5; }
 
   /* Layout */
@@ -88,7 +96,7 @@
   .citations-toggle:hover { color: var(--blue-light); }
   .citations-toggle::before { content: '▶'; font-size: 9px; transition: transform .15s; }
   .citations-toggle.open::before { transform: rotate(90deg); }
-  .citations-list { display: none; margin-top: 6px; display: flex; flex-direction: column; gap: 4px; }
+  .citations-list { display: none; margin-top: 6px; flex-direction: column; gap: 4px; }
   .citations-list.visible { display: flex; }
   .citation-item { background: var(--bg2); border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; font-size: 11px; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
   .citation-item a { color: var(--blue-light); text-decoration: none; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -122,7 +130,7 @@
   #research-panel { display: none; flex-direction: column; flex: 1; overflow: hidden; padding: 20px; gap: 16px; overflow-y: auto; }
   #research-panel.active { display: flex; }
   .research-form { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 20px; display: flex; flex-direction: column; gap: 14px; }
-  .research-form h2 { font-size: 15px; color: #fff; margin-bottom: 4px; }
+  .research-form h2 { font-size: 15px; color: var(--text); margin-bottom: 4px; }
   .form-group { display: flex; flex-direction: column; gap: 6px; }
   .form-group label { font-size: 12px; color: var(--text-dim); font-weight: 500; }
   .form-input { background: var(--bg3); border: 1px solid var(--border); color: var(--text); padding: 8px 12px; border-radius: var(--radius); font-size: 13px; font-family: inherit; }
@@ -138,12 +146,29 @@
   .research-btn:disabled { background: var(--bg4); color: var(--text-muted); cursor: not-allowed; }
   .research-result { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 20px; }
   .research-result h3 { font-size: 14px; color: var(--blue-light); margin-bottom: 12px; }
+  .research-section { margin-bottom: 16px; }
+  .research-section h4 { font-size: 13px; color: var(--text); margin-bottom: 8px; font-weight: 600; }
+  .opp-card { background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 14px; margin-bottom: 8px; }
+  .opp-card .opp-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+  .opp-card .opp-title { font-size: 13px; font-weight: 600; color: var(--text); }
+  .opp-card .opp-layer { font-size: 10px; padding: 2px 8px; border-radius: 10px; background: var(--blue); color: #fff; }
+  .opp-card .opp-desc { font-size: 12px; color: var(--text-dim); margin-bottom: 4px; }
+  .opp-card .opp-services { font-size: 11px; color: var(--text-muted); }
+  .priority-high { border-left: 3px solid var(--error); }
+  .priority-medium { border-left: 3px solid #dcdcaa; }
+  .priority-low { border-left: 3px solid var(--success); }
 
   /* Error & empty states */
   .error-msg { background: rgba(209,52,56,.15); border: 1px solid rgba(209,52,56,.4); color: #f87171; padding: 10px 14px; border-radius: var(--radius); font-size: 12px; align-self: flex-start; max-width: 88%; }
   .empty-state { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--text-muted); gap: 8px; text-align: center; padding: 40px; }
   .empty-state .icon { font-size: 40px; opacity: .4; }
   .empty-state p { font-size: 13px; }
+
+  /* Status bar */
+  .status-indicator { display: inline-flex; align-items: center; gap: 4px; }
+  .status-dot { width: 6px; height: 6px; border-radius: 50%; }
+  .status-dot.online { background: var(--success); }
+  .status-dot.offline { background: var(--error); }
 
   /* Footer */
   footer { padding: 8px 20px; background: var(--bg2); border-top: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; gap: 8px; flex-wrap: wrap; }
@@ -171,7 +196,7 @@
       <h1>Azure IQ Engine</h1>
       <p>Unified Knowledge for Work IQ · Fabric IQ · Foundry IQ</p>
     </div>
-    <span class="version-badge">v0.1.0 MVP</span>
+    <span class="version-badge" id="version-badge">v0.2.4</span>
     <div class="header-actions">
       <button class="hdr-btn" id="clear-history-btn" title="Clear chat history">🗑️</button>
       <button class="hdr-btn" id="export-md-btn" title="Export as Markdown">📥</button>
@@ -183,13 +208,16 @@
   <div class="tabs">
     <div class="tab active" data-tab="ask">💬 Ask</div>
     <div class="tab" data-tab="research">🔍 Research</div>
+    <div class="tab" data-tab="explore">📚 Explore</div>
   </div>
 
   <!-- Quick actions -->
-  <div class="quick-actions">
-    <button class="quick-btn" data-fill="What's new this week in Microsoft IQ?">⚡ What's new this week?</button>
+  <div class="quick-actions" id="quick-actions">
+    <button class="quick-btn" data-fill="What's new this week in Microsoft IQ?">⚡ What's new?</button>
     <button class="quick-btn" data-fill="Compare Microsoft IQ vs competitors — key differentiators?">⚖️ Compare vs competitors</button>
-    <button class="quick-btn" data-fill="Explain the Fabric IQ ontology and data model">🧩 Explain Fabric IQ ontology</button>
+    <button class="quick-btn" data-fill="Explain the Fabric IQ ontology and data model">🧩 Fabric IQ ontology</button>
+    <button class="quick-btn" data-fill="What Azure services power Work IQ?">💼 Work IQ services</button>
+    <button class="quick-btn" data-fill="How does Foundry IQ integrate with Azure AI Foundry?">🏭 Foundry IQ</button>
     <button class="quick-btn" data-research>🏢 Research a company</button>
   </div>
 
@@ -202,19 +230,23 @@
         <div class="empty-state" id="empty-state">
           <div class="icon">🧠</div>
           <p>Ask anything about Microsoft IQ — Work IQ, Fabric IQ, or Foundry IQ.</p>
-          <p style="font-size:12px;">Use quick actions above or type your question below.</p>
+          <p style="font-size:12px;">Grounded answers from MS Learn, Azure Updates, and more.</p>
         </div>
       </div>
       <div class="input-area">
         <div class="input-controls">
           <select class="agent-select" id="agent-select">
-            <option value="auto">🤖 Auto (recommended)</option>
-            <option value="iq_architect">🏗️ IQ Architect</option>
-            <option value="azure_navigator">🗺️ Azure Navigator</option>
-            <option value="story_weaver">📖 Story Weaver</option>
-            <option value="latest_updates">📰 Latest Updates</option>
-            <option value="competitive_context">⚖️ Competitive Context</option>
+            <option value="auto">🤖 Auto-route</option>
+            <option value="iq-architect">🏗️ IQ Architect</option>
+            <option value="azure-navigator">🗺️ Azure Navigator</option>
+            <option value="story-weaver">📖 Story Weaver</option>
+            <option value="latest-updates">📰 Latest Updates</option>
+            <option value="competitive-context">⚖️ Competitive Context</option>
           </select>
+          <span class="status-indicator" id="status-indicator">
+            <span class="status-dot offline" id="status-dot"></span>
+            <span style="font-size:11px;color:var(--text-muted)" id="status-text">Connecting…</span>
+          </span>
         </div>
         <div class="input-row">
           <textarea class="msg-input" id="msg-input" placeholder="Ask about Microsoft IQ, Fabric IQ, Foundry IQ…" rows="1"></textarea>
@@ -226,7 +258,7 @@
     <!-- Research panel -->
     <div id="research-panel">
       <div class="research-form">
-        <h2>🏢 Company Research</h2>
+        <h2>🏢 Company IQ Assessment</h2>
         <p style="font-size:12px;color:var(--text-dim)">Analyze a company through the Microsoft IQ lens — identify strategic fit, use cases, and relevant IQ capabilities.</p>
         <div class="form-group">
           <label>Company Name *</label>
@@ -252,15 +284,32 @@
             <label class="checkbox-label"><input type="checkbox" value="work_iq"> Work IQ</label>
             <label class="checkbox-label"><input type="checkbox" value="fabric_iq"> Fabric IQ</label>
             <label class="checkbox-label"><input type="checkbox" value="foundry_iq"> Foundry IQ</label>
-            <label class="checkbox-label"><input type="checkbox" value="competitive"> Competitive Landscape</label>
+            <label class="checkbox-label"><input type="checkbox" value="competitive"> Competitive</label>
             <label class="checkbox-label"><input type="checkbox" value="use_cases"> Use Cases</label>
           </div>
         </div>
-        <button class="research-btn" id="research-btn">🔍 Research Company</button>
+        <button class="research-btn" id="research-btn">🔍 Generate IQ Assessment</button>
       </div>
-      <div class="research-result" id="research-result" style="display:none">
-        <h3 id="research-result-title"></h3>
-        <div class="md" id="research-result-content"></div>
+      <div class="research-result" id="research-result" style="display:none"></div>
+    </div>
+
+    <!-- Explore panel -->
+    <div id="explore-panel" style="display:none; flex-direction:column; flex:1; overflow:hidden; padding:20px; gap:16px; overflow-y:auto;">
+      <div style="background:var(--bg2); border:1px solid var(--border); border-radius:var(--radius-lg); padding:20px;">
+        <h2 style="font-size:15px; color:var(--text); margin-bottom:12px;">📚 Browse the Knowledge Corpus</h2>
+        <div style="display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap;">
+          <input type="text" class="form-input" id="explore-query" placeholder="Search the corpus…" style="flex:1; min-width:200px;">
+          <select class="form-select" id="explore-source-filter" style="max-width:180px;">
+            <option value="">All sources</option>
+          </select>
+          <button class="send-btn" id="explore-search-btn">Search</button>
+        </div>
+        <div id="explore-results"></div>
+        <div id="explore-empty" style="text-align:center; color:var(--text-muted); padding:40px;">
+          <div style="font-size:32px; opacity:.4; margin-bottom:8px;">📖</div>
+          <p style="font-size:13px;">Search the indexed corpus directly — no LLM involved.</p>
+          <p style="font-size:12px;">Results are ranked by Azure AI Search semantic reranking.</p>
+        </div>
       </div>
     </div>
 
@@ -268,8 +317,8 @@
 
   <!-- Footer -->
   <footer>
-    <span id="source-stats">Loading source stats…</span>
-    <span>Built on Microsoft Agent Framework + Azure AI Foundry</span>
+    <span id="source-stats">Loading…</span>
+    <span>Built on Azure AI Foundry · AI Search · Agent Framework</span>
   </footer>
 
 </div><!-- /.app -->
@@ -279,39 +328,29 @@
 function renderMarkdown(text) {
   if (!text) return '';
   let html = text
-    // Code blocks (fenced)
     .replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) =>
       `<pre><code class="${lang || ''}">${escHtml(code.trim())}</code></pre>`)
-    // Inline code
     .replace(/`([^`]+)`/g, (_, c) => `<code>${escHtml(c)}</code>`)
-    // Headings
     .replace(/^### (.+)$/gm, '<h3>$1</h3>')
     .replace(/^## (.+)$/gm, '<h2>$1</h2>')
     .replace(/^# (.+)$/gm, '<h1>$1</h1>')
-    // Bold & italic
     .replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>')
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
     .replace(/\*(.+?)\*/g, '<em>$1</em>')
-    // HR
     .replace(/^---$/gm, '<hr>')
-    // Unordered list
     .replace(/^\s*[-*] (.+)$/gm, '<li>$1</li>')
     .replace(/(<li>.*<\/li>\n?)+/g, m => `<ul>${m}</ul>`)
-    // Ordered list
     .replace(/^\d+\. (.+)$/gm, '<li>$1</li>')
-    // Links
     .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
-    // Paragraphs (double newline)
     .replace(/\n\n+/g, '</p><p>')
-    // Line breaks
     .replace(/\n/g, '<br>');
   return `<p>${html}</p>`;
 }
 function escHtml(s) {
-  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-// ─── Theme management ──────────────────────────────────────────────────────
+// ─── Theme ──────────────────────────────────────────────────────────────────
 const THEME_KEY = 'iq-engine-theme';
 const HISTORY_KEY = 'iq-engine-chat-history';
 const MAX_HISTORY = 50;
@@ -321,22 +360,15 @@ function applyTheme(theme) {
   const btn = document.getElementById('theme-toggle-btn');
   if (btn) btn.textContent = theme === 'light' ? '🌑' : '🌙';
 }
-
 function toggleTheme() {
   const current = document.documentElement.getAttribute('data-theme') || 'dark';
   const next = current === 'dark' ? 'light' : 'dark';
   applyTheme(next);
   localStorage.setItem(THEME_KEY, next);
 }
-
-// Load saved theme immediately (before paint)
-(function() {
-  const saved = localStorage.getItem(THEME_KEY);
-  if (saved) applyTheme(saved);
-})();
+(function() { const saved = localStorage.getItem(THEME_KEY); if (saved) applyTheme(saved); })();
 
 // ─── Chat history persistence ──────────────────────────────────────────────
-// Each entry: { role: 'user'|'assistant', content: string, meta?: object, ts: number }
 let chatHistoryStore = [];
 
 function loadHistoryStore() {
@@ -347,24 +379,18 @@ function loadHistoryStore() {
 }
 
 function saveHistoryStore() {
-  // Keep last MAX_HISTORY messages
-  if (chatHistoryStore.length > MAX_HISTORY) {
-    chatHistoryStore = chatHistoryStore.slice(-MAX_HISTORY);
-  }
-  try {
-    localStorage.setItem(HISTORY_KEY, JSON.stringify(chatHistoryStore));
-  } catch { /* storage full — ignore */ }
+  if (chatHistoryStore.length > MAX_HISTORY) chatHistoryStore = chatHistoryStore.slice(-MAX_HISTORY);
+  try { localStorage.setItem(HISTORY_KEY, JSON.stringify(chatHistoryStore)); } catch {}
 }
 
 function clearHistory() {
   chatHistoryStore = [];
   localStorage.removeItem(HISTORY_KEY);
-  // Remove all rendered messages except the empty-state
   const ch = document.getElementById('chat-history');
   ch.innerHTML = `<div class="empty-state" id="empty-state">
     <div class="icon">🧠</div>
     <p>Ask anything about Microsoft IQ — Work IQ, Fabric IQ, or Foundry IQ.</p>
-    <p style="font-size:12px;">Use quick actions above or type your question below.</p>
+    <p style="font-size:12px;">Grounded answers from MS Learn, Azure Updates, and more.</p>
   </div>`;
 }
 
@@ -373,8 +399,7 @@ function exportAsMarkdown() {
   const lines = ['# Azure IQ Engine — Chat Export', `_Exported ${new Date().toLocaleString()}_`, ''];
   for (const entry of chatHistoryStore) {
     const label = entry.role === 'user' ? '**You**' : '**IQ Engine**';
-    lines.push(`${label}: ${entry.content}`);
-    lines.push('');
+    lines.push(`${label}: ${entry.content}\n`);
   }
   const blob = new Blob([lines.join('\n')], { type: 'text/markdown' });
   const a = document.createElement('a');
@@ -388,15 +413,12 @@ function restoreHistoryToDOM() {
   if (!chatHistoryStore.length) return;
   hideEmptyState();
   for (const entry of chatHistoryStore) {
-    if (entry.role === 'user') {
-      _renderUserBubble(entry.content);
-    } else if (entry.role === 'assistant') {
-      _renderAssistantBubble(entry.data || { answer: entry.content }, entry.agent || null, entry.elapsed || '');
-    }
+    if (entry.role === 'user') _renderUserBubble(entry.content);
+    else if (entry.role === 'assistant') _renderAssistantBubble(entry.data || { answer: entry.content }, entry.agent || null, entry.elapsed || '');
   }
 }
 
-// ─── State ─────────────────────────────────────────────────────────────────
+// ─── State ──────────────────────────────────────────────────────────────────
 let isLoading = false;
 let currentTab = 'ask';
 
@@ -407,16 +429,18 @@ const sendBtn       = document.getElementById('send-btn');
 const agentSelect   = document.getElementById('agent-select');
 const askPanel      = document.getElementById('ask-panel');
 const researchPanel = document.getElementById('research-panel');
+const explorePanel  = document.getElementById('explore-panel');
+const quickActions  = document.getElementById('quick-actions');
 const sourceStats   = document.getElementById('source-stats');
 
 // ─── Wire header buttons ────────────────────────────────────────────────────
 document.getElementById('theme-toggle-btn').addEventListener('click', toggleTheme);
 document.getElementById('clear-history-btn').addEventListener('click', () => {
-  if (confirm('Clear all chat history? This cannot be undone.')) clearHistory();
+  if (confirm('Clear all chat history?')) clearHistory();
 });
 document.getElementById('export-md-btn').addEventListener('click', exportAsMarkdown);
 
-// ─── Init: load theme + history ─────────────────────────────────────────────
+// ─── Init ───────────────────────────────────────────────────────────────────
 loadHistoryStore();
 restoreHistoryToDOM();
 
@@ -426,20 +450,17 @@ document.querySelectorAll('.tab').forEach(tab => {
     currentTab = tab.dataset.tab;
     document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
     tab.classList.add('active');
-    if (currentTab === 'ask') {
-      askPanel.style.display = 'flex';
-      researchPanel.classList.remove('active');
-    } else {
-      askPanel.style.display = 'none';
-      researchPanel.classList.add('active');
-    }
+    askPanel.style.display = currentTab === 'ask' ? 'flex' : 'none';
+    researchPanel.classList.toggle('active', currentTab === 'research');
+    explorePanel.style.display = currentTab === 'explore' ? 'flex' : 'none';
+    quickActions.style.display = currentTab === 'ask' ? 'flex' : 'none';
   });
 });
 
 // ─── Quick actions ──────────────────────────────────────────────────────────
 document.querySelectorAll('.quick-btn[data-fill]').forEach(btn => {
   btn.addEventListener('click', () => {
-    switchToAsk();
+    document.querySelector('.tab[data-tab="ask"]').click();
     msgInput.value = btn.dataset.fill;
     autoResizeInput();
     msgInput.focus();
@@ -452,18 +473,12 @@ document.querySelectorAll('.quick-btn[data-research]').forEach(btn => {
   });
 });
 
-function switchToAsk() {
-  document.querySelector('.tab[data-tab="ask"]').click();
-}
-
 // ─── Auto-resize textarea ───────────────────────────────────────────────────
 function autoResizeInput() {
   msgInput.style.height = 'auto';
   msgInput.style.height = Math.min(msgInput.scrollHeight, 120) + 'px';
 }
 msgInput.addEventListener('input', autoResizeInput);
-
-// ─── Send on Enter (Shift+Enter = newline) ──────────────────────────────────
 msgInput.addEventListener('keydown', e => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
 });
@@ -484,17 +499,20 @@ async function sendMessage() {
 
   const t0 = Date.now();
   try {
+    const body = { question: text };
+    if (agent !== 'auto') body.agent = agent;
+
     const res = await fetch('/api/query', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ question: text, agent: agent === 'auto' ? null : agent })
+      body: JSON.stringify(body),
     });
     const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
 
     if (!res.ok) {
-      const err = await res.text().catch(() => 'Unknown error');
+      const err = await res.json().catch(() => ({ detail: 'Unknown error' }));
       removeEl(typingEl);
-      appendError(`API error ${res.status}: ${err}`);
+      appendError(`Error ${res.status}: ${err.detail || JSON.stringify(err)}`);
     } else {
       const data = await res.json();
       removeEl(typingEl);
@@ -502,7 +520,7 @@ async function sendMessage() {
     }
   } catch (err) {
     removeEl(typingEl);
-    appendError(`Connection error: ${err.message}. Is the backend running?`);
+    appendError(`Connection error: ${err.message}`);
   } finally {
     setLoading(false);
   }
@@ -522,28 +540,34 @@ function _renderAssistantBubble(data, agent, elapsed) {
   const content = data.answer || data.response || data.content || JSON.stringify(data);
   const citations = data.citations || data.sources || [];
   const tokens = data.tokens_used || data.token_count || null;
-  const agentUsed = data.agent_used || data.agent || (agent && agent !== 'auto' ? agent : null);
+  const confidence = data.confidence != null ? data.confidence : null;
+  const agentUsed = data.agent || (agent && agent !== 'auto' ? agent : null);
+  const latency = data.latency_ms ? `${(data.latency_ms / 1000).toFixed(1)}s` : (elapsed ? `${elapsed}s` : '');
+  const iqLayers = data.iq_layers || [];
 
   const div = document.createElement('div');
   div.className = 'msg assistant';
 
-  let metaHtml = elapsed ? `<span>${elapsed}s</span>` : '';
-  if (tokens) metaHtml += `<span>${tokens} tokens</span>`;
-  if (agentUsed && agentUsed !== 'auto') metaHtml += `<span class="msg-agent-tag">${agentUsed.replace(/_/g,' ')}</span>`;
+  let metaParts = [];
+  if (latency) metaParts.push(`<span>⏱ ${latency}</span>`);
+  if (tokens) metaParts.push(`<span>🔢 ${tokens} tokens</span>`);
+  if (confidence != null) metaParts.push(`<span>📊 ${Math.round(confidence * 100)}%</span>`);
+  if (agentUsed && agentUsed !== 'auto') metaParts.push(`<span class="msg-agent-tag">${agentUsed}</span>`);
+  if (iqLayers.length) metaParts.push(`<span>${iqLayers.map(l => `<span class="msg-agent-tag">${l}</span>`).join(' ')}</span>`);
 
   let citationsHtml = '';
   if (citations.length > 0) {
     const items = citations.map(c => {
-      const pct = c.score != null ? Math.round(c.score * 100) : (c.relevance_score != null ? Math.round(c.relevance_score * 100) : null);
+      const pct = c.relevance_score != null ? Math.round(c.relevance_score * 100) : (c.score != null ? Math.round(c.score * 100) : null);
       const cls = pct != null ? (pct >= 80 ? 'high' : pct >= 60 ? 'mid' : '') : '';
       const scoreLabel = pct != null ? `${pct}%` : '';
       const url = c.source_url || c.url || '#';
-      const title = escHtml(c.title || c.source || url);
+      const title = escHtml(c.title || url);
       return `<div class="citation-item"><a href="${escHtml(url)}" target="_blank" rel="noopener" title="${title}">${title}</a>${scoreLabel ? `<span class="relevance ${cls}">${scoreLabel}</span>` : ''}</div>`;
     }).join('');
     citationsHtml = `
       <div class="citations">
-        <button class="citations-toggle" onclick="toggleCitations(this)">${citations.length} source${citations.length !== 1 ? 's' : ''}</button>
+        <button class="citations-toggle" onclick="toggleCitations(this)">📎 ${citations.length} source${citations.length !== 1 ? 's' : ''}</button>
         <div class="citations-list">${items}</div>
       </div>`;
   }
@@ -553,7 +577,7 @@ function _renderAssistantBubble(data, agent, elapsed) {
       <div class="md">${renderMarkdown(content)}</div>
       ${citationsHtml}
     </div>
-    <div class="msg-meta">${metaHtml}</div>`;
+    <div class="msg-meta">${metaParts.join('')}</div>`;
   chatHistory.appendChild(div);
   scrollBottom();
 }
@@ -591,8 +615,7 @@ function appendError(msg) {
 
 function toggleCitations(btn) {
   btn.classList.toggle('open');
-  const list = btn.nextElementSibling;
-  list.classList.toggle('visible');
+  btn.nextElementSibling.classList.toggle('visible');
 }
 
 // ─── Research ───────────────────────────────────────────────────────────────
@@ -605,8 +628,6 @@ document.getElementById('research-btn').addEventListener('click', async () => {
 
   const btn = document.getElementById('research-btn');
   const resultEl = document.getElementById('research-result');
-  const titleEl = document.getElementById('research-result-title');
-  const contentEl = document.getElementById('research-result-content');
 
   btn.disabled = true;
   btn.textContent = '⏳ Researching…';
@@ -616,49 +637,184 @@ document.getElementById('research-btn').addEventListener('click', async () => {
     const res = await fetch('/api/research', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ company, industry: industry || null, focus_areas: focusAreas })
+      body: JSON.stringify({ company, industry: industry || null, focus_areas: focusAreas.length ? focusAreas : null }),
     });
     if (!res.ok) {
-      const err = await res.text().catch(() => 'Unknown error');
-      alert(`Research error ${res.status}: ${err}`);
+      const err = await res.json().catch(() => ({ detail: 'Unknown error' }));
+      alert(`Research error ${res.status}: ${err.detail || JSON.stringify(err)}`);
     } else {
       const data = await res.json();
-      const content = data.analysis || data.result || data.content || JSON.stringify(data, null, 2);
-      titleEl.textContent = `Research: ${company}`;
-      contentEl.innerHTML = renderMarkdown(content);
-      resultEl.style.display = 'block';
-      resultEl.scrollIntoView({ behavior: 'smooth' });
+      renderResearchResult(data, company);
     }
   } catch (err) {
-    alert(`Connection error: ${err.message}. Is the backend running?`);
+    alert(`Connection error: ${err.message}`);
   } finally {
     btn.disabled = false;
-    btn.textContent = '🔍 Research Company';
+    btn.textContent = '🔍 Generate IQ Assessment';
   }
 });
 
-// ─── Source stats ───────────────────────────────────────────────────────────
+function renderResearchResult(data, company) {
+  const el = document.getElementById('research-result');
+
+  let html = `<h3>📊 IQ Assessment: ${escHtml(company)}</h3>`;
+
+  // Summary
+  if (data.summary) {
+    html += `<div class="research-section"><h4>Executive Summary</h4><div class="md">${renderMarkdown(data.summary)}</div></div>`;
+  }
+
+  // IQ Opportunities
+  if (data.iq_opportunities && data.iq_opportunities.length) {
+    html += `<div class="research-section"><h4>IQ Opportunities (${data.iq_opportunities.length})</h4>`;
+    for (const opp of data.iq_opportunities) {
+      html += `<div class="opp-card priority-${opp.priority || 'medium'}">
+        <div class="opp-header">
+          <span class="opp-title">${escHtml(opp.title)}</span>
+          <span class="opp-layer">${escHtml(opp.layer)}</span>
+        </div>
+        <div class="opp-desc">${escHtml(opp.description)}</div>
+        ${opp.services && opp.services.length ? `<div class="opp-services">Services: ${opp.services.map(s => escHtml(s)).join(', ')}</div>` : ''}
+      </div>`;
+    }
+    html += `</div>`;
+  }
+
+  // Recommended approach
+  if (data.recommended_approach) {
+    html += `<div class="research-section"><h4>Recommended Approach</h4><div class="md">${renderMarkdown(data.recommended_approach)}</div></div>`;
+  }
+
+  // Citations
+  if (data.citations && data.citations.length) {
+    html += `<div class="research-section"><h4>Sources (${data.citations.length})</h4>`;
+    for (const c of data.citations) {
+      const url = c.source_url || '#';
+      html += `<div class="citation-item"><a href="${escHtml(url)}" target="_blank">${escHtml(c.title || url)}</a></div>`;
+    }
+    html += `</div>`;
+  }
+
+  // Meta
+  const meta = [];
+  if (data.tokens_used) meta.push(`${data.tokens_used} tokens`);
+  if (data.latency_ms) meta.push(`${(data.latency_ms / 1000).toFixed(1)}s`);
+  if (meta.length) html += `<div style="font-size:11px;color:var(--text-muted);margin-top:12px;">${meta.join(' · ')}</div>`;
+
+  el.innerHTML = html;
+  el.style.display = 'block';
+  el.scrollIntoView({ behavior: 'smooth' });
+}
+
+// ─── Explore (direct search) ────────────────────────────────────────────────
+document.getElementById('explore-search-btn').addEventListener('click', doExploreSearch);
+document.getElementById('explore-query').addEventListener('keydown', e => {
+  if (e.key === 'Enter') doExploreSearch();
+});
+
+async function doExploreSearch() {
+  const q = document.getElementById('explore-query').value.trim();
+  if (!q) return;
+
+  const sourceFilter = document.getElementById('explore-source-filter').value;
+  const resultsEl = document.getElementById('explore-results');
+  const emptyEl = document.getElementById('explore-empty');
+  const btn = document.getElementById('explore-search-btn');
+
+  btn.disabled = true;
+  btn.textContent = '…';
+  resultsEl.innerHTML = '';
+  emptyEl.style.display = 'none';
+
+  try {
+    let url = `/api/search?q=${encodeURIComponent(q)}&top=15`;
+    if (sourceFilter) url += `&source_type=${encodeURIComponent(sourceFilter)}`;
+
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+
+    if (!data.results || !data.results.length) {
+      emptyEl.innerHTML = '<p style="font-size:13px;">No results found. Try different keywords.</p>';
+      emptyEl.style.display = 'block';
+      return;
+    }
+
+    let html = `<div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">${data.results.length} results for "${escHtml(q)}"</div>`;
+    for (const r of data.results) {
+      const score = r.score != null ? `<span class="relevance ${r.score > 5 ? 'high' : r.score > 2 ? 'mid' : ''}">${r.score.toFixed(2)}</span>` : '';
+      const sourceTag = r.source_type ? `<span class="msg-agent-tag">${escHtml(r.source_type)}</span>` : '';
+      const iqTag = r.iq_layer ? `<span class="msg-agent-tag">${escHtml(r.iq_layer)}</span>` : '';
+      html += `<div style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius);padding:12px;margin-bottom:8px;">
+        <div style="display:flex;justify-content:space-between;align-items:start;gap:8px;margin-bottom:4px;">
+          <a href="${escHtml(r.source_url || '#')}" target="_blank" style="color:var(--blue-light);font-size:13px;font-weight:600;text-decoration:none;">${escHtml(r.title || 'Untitled')}</a>
+          ${score}
+        </div>
+        <p style="font-size:12px;color:var(--text-dim);margin-bottom:6px;line-height:1.5;">${escHtml((r.snippet || '').substring(0, 300))}${(r.snippet || '').length > 300 ? '…' : ''}</p>
+        <div style="display:flex;gap:6px;align-items:center;">${sourceTag}${iqTag}</div>
+      </div>`;
+    }
+    resultsEl.innerHTML = html;
+  } catch (err) {
+    emptyEl.innerHTML = `<p style="color:var(--error);">Search failed: ${escHtml(err.message)}</p>`;
+    emptyEl.style.display = 'block';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Search';
+  }
+}
+
+// ─── Source stats + health check ────────────────────────────────────────────
 async function loadSourceStats() {
   try {
     const res = await fetch('/api/sources');
-    if (!res.ok) return;
+    if (!res.ok) throw new Error('sources unavailable');
     const data = await res.json();
-    const total = data.total_documents || data.total || null;
-    const breakdown = data.by_source || data.sources || null;
-    let text = 'Powered by';
-    if (total) text += ` ${total.toLocaleString()} documents`;
-    if (breakdown) {
-      const parts = Object.entries(breakdown).map(([k, v]) => `${v.toLocaleString()} from ${k}`);
-      if (parts.length) text += ` (${parts.join(', ')})`;
-    } else if (!total) {
-      text += ' MS Learn, YouTube, Azure Updates, Tech Community';
+
+    // Populate explore filter
+    const filterSelect = document.getElementById('explore-source-filter');
+    for (const src of (data.sources || [])) {
+      if (src.chunk_count > 0) {
+        const opt = document.createElement('option');
+        opt.value = src.source_id;
+        opt.textContent = `${src.display_name} (${src.chunk_count})`;
+        filterSelect.appendChild(opt);
+      }
     }
-    sourceStats.textContent = text;
+
+    const total = data.total_chunks || 0;
+    const activeSources = (data.sources || []).filter(s => s.chunk_count > 0);
+    if (total > 0) {
+      const parts = activeSources.map(s => `${s.chunk_count} from ${s.display_name}`);
+      sourceStats.textContent = `📦 ${total.toLocaleString()} chunks indexed${parts.length ? ' — ' + parts.join(', ') : ''}`;
+    } else {
+      sourceStats.textContent = 'No documents indexed yet';
+    }
   } catch {
-    sourceStats.textContent = 'Powered by MS Learn · YouTube · Azure Updates · Tech Community';
+    sourceStats.textContent = 'Powered by MS Learn · Azure Updates · Tech Community';
   }
 }
+
+async function checkHealth() {
+  const dot = document.getElementById('status-dot');
+  const text = document.getElementById('status-text');
+  try {
+    const res = await fetch('/health');
+    const data = await res.json();
+    dot.className = 'status-dot online';
+    text.textContent = `${data.version || 'Online'}`;
+    // Update version badge
+    if (data.version) document.getElementById('version-badge').textContent = `v${data.version}`;
+  } catch {
+    dot.className = 'status-dot offline';
+    text.textContent = 'Offline';
+  }
+}
+
 loadSourceStats();
+checkHealth();
+// Re-check health every 60s
+setInterval(checkHealth, 60000);
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 function hideEmptyState() {
