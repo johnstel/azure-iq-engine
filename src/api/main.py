@@ -97,11 +97,20 @@ async def lifespan(app: FastAPI):
     if settings.has_foundry:
         try:
             from agent_framework.azure import AzureOpenAIResponsesClient  # type: ignore[import]
-            from azure.identity import DefaultAzureCredential
             from ..engine.agents import create_agents, create_workflows
 
+            # Prefer API key auth (FOUNDRY_KEY) over DefaultAzureCredential
+            # to avoid Managed Identity issues in Container Apps.
+            foundry_key = settings.foundry_key
+            if foundry_key:
+                from azure.core.credentials import AzureKeyCredential  # type: ignore[import]
+                credential = AzureKeyCredential(foundry_key)
+            else:
+                from azure.identity import DefaultAzureCredential  # type: ignore[import]
+                credential = DefaultAzureCredential()
+
             client = AzureOpenAIResponsesClient(
-                credential=DefaultAzureCredential(),
+                credential=credential,
                 endpoint=settings.foundry_base_url,
             )
             app.state.agents = create_agents(client)

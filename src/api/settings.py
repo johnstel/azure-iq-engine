@@ -38,7 +38,7 @@ class Settings(BaseSettings):
         description="Azure AI Foundry API key (FOUNDRY_KEY)",
     )
     openai_deployment: str = Field(
-        default="gpt-5.1-codex",
+        default="Kimi-K2.5",
         description="Chat completion deployment name on Azure AI Foundry",
     )
     openai_embedding_deployment: str = Field(

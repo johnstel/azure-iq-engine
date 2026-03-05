@@ -2,7 +2,7 @@
 IQ Engine specialist agents — Microsoft Agent Framework on Azure AI Foundry.
 
 6 agents with function tools, composable into multi-agent workflows.
-Orchestration patterns: sequential, concurrent, handoff, group chat.
+Orchestration patterns: sequential, concurrent.
 
 Requirements:
   pip install agent-framework --pre
@@ -10,9 +10,10 @@ Requirements:
   pip install agent-framework-orchestrations --pre
 """
 
-from agent_framework.azure import AzureOpenAIResponsesClient
-from agent_framework.orchestrations import SequentialBuilder, ConcurrentBuilder
-from azure.identity import DefaultAzureCredential
+from __future__ import annotations
+
+import logging
+from typing import Any
 
 from .tools import (
     search_iq_corpus,
@@ -22,8 +23,10 @@ from .tools import (
     generate_outcome_doc,
 )
 
+logger = logging.getLogger(__name__)
 
-def create_agents(client: AzureOpenAIResponsesClient) -> dict:
+
+def create_agents(client: Any) -> dict:
     """Create all specialist agents."""
 
     iq_architect = client.as_agent(
@@ -88,28 +91,24 @@ def create_agents(client: AzureOpenAIResponsesClient) -> dict:
 
 
 def create_workflows(agents: dict) -> dict:
-    """Create multi-agent workflow compositions."""
+    """
+    Create multi-agent workflow compositions.
 
-    # Customer outcome: research → architect → story weave
-    customer_outcome = SequentialBuilder(
-        participants=[
-            agents["customer-researcher"],
-            agents["iq-architect"],
-            agents["story-weaver"],
-        ]
-    ).build()
-
-    # Deep dive: architect + navigator in parallel → story weave
-    deep_dive = SequentialBuilder(
-        participants=[
-            ConcurrentBuilder(
-                participants=[agents["iq-architect"], agents["azure-navigator"]]
-            ).build(),
-            agents["story-weaver"],
-        ]
-    ).build()
-
+    Returns workflow *definitions* (lists of agent names) rather than
+    built SequentialBuilder instances.  The API layer resolves these at
+    request time so we avoid the startup crash caused by nesting a
+    Workflow object inside SequentialBuilder (the orchestrations beta
+    only accepts Agent/Executor participants).
+    """
     return {
-        "customer-outcome": customer_outcome,
-        "deep-dive": deep_dive,
+        "customer-outcome": {
+            "description": "Customer outcome: research → architect → story weave",
+            "steps": ["customer-researcher", "iq-architect", "story-weaver"],
+            "type": "sequential",
+        },
+        "deep-dive": {
+            "description": "Deep dive: architect + navigator → story weave",
+            "steps": ["iq-architect", "azure-navigator", "story-weaver"],
+            "type": "sequential",
+        },
     }
