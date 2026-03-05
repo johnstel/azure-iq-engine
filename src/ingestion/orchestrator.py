@@ -33,10 +33,15 @@ from src.ingestion.chunker import ContentTypeAwareChunker, SourceType
 
 # Crawlers — MSLearnCrawler may be None if implementation is pending
 from src.ingestion.crawlers import (
-    MSLearnCrawler,          # TODO: verify/adjust once MSLearn crawler is implemented
+    MSLearnCrawler,
     YouTubeCrawler,
     AzureUpdatesCrawler,
     TechCommunityCrawler,
+)
+from src.ingestion.crawlers.mslearn_crawler import (
+    CrawlerConfig as MSLearnCrawlerConfig,
+    ARCHITECTURE_CENTER_SEEDS,
+    WAF_SEEDS,
 )
 
 # TODO: Implement EmbeddingPipeline in src/ingestion/embedder.py
@@ -88,10 +93,12 @@ class _SourceRoute:
 
 
 SOURCE_ROUTING: dict[str, _SourceRoute] = {
-    "mslearn":        _SourceRoute("ms-learn",          "content"),        # TODO: verify field once MSLearnCrawler lands
-    "youtube":        _SourceRoute("video-transcript",   "transcript_text"),
-    "azure_updates":  _SourceRoute("azure-update",       "summary"),
-    "techcommunity":  _SourceRoute("blog-post",          "body_text"),
+    "mslearn":             _SourceRoute("ms-learn",          "content"),
+    "youtube":             _SourceRoute("video-transcript",   "transcript_text"),
+    "azure_updates":       _SourceRoute("azure-update",       "summary"),
+    "techcommunity":       _SourceRoute("blog-post",          "body_text"),
+    "architecture_center": _SourceRoute("ms-learn",          "content"),
+    "well_architected":    _SourceRoute("ms-learn",          "content"),
 }
 
 ALL_SOURCES: list[str] = list(SOURCE_ROUTING.keys())
@@ -349,12 +356,49 @@ class IngestionOrchestrator:
                     "MSLearnCrawler is not yet implemented — skipping 'mslearn' source."
                 )
                 return None
-            # TODO: Adjust MSLearnCrawler constructor kwargs once implementation lands.
-            #       Expected signature (TBD):
-            #         MSLearnCrawler(checkpoint_path=..., max_pages=..., force_recrawl=...)
-            return MSLearnCrawler(
-                checkpoint_path=checkpoint_dir / "mslearn_checkpoint.json",
+            cp = checkpoint_dir / "mslearn_checkpoint.json"
+            if force and cp.exists():
+                logger.info("  🗑️   Removing MSLearn checkpoint for force-recrawl: %s", cp)
+                cp.unlink()
+            config = MSLearnCrawlerConfig(
+                checkpoint_path=str(cp),
+                **({"max_pages": max_pages} if max_pages is not None else {}),
             )
+            return MSLearnCrawler(config)
+
+        if source == "architecture_center":
+            if MSLearnCrawler is None:
+                logger.warning(
+                    "MSLearnCrawler is not available — skipping 'architecture_center' source."
+                )
+                return None
+            cp = checkpoint_dir / "architecture_center_checkpoint.json"
+            if force and cp.exists():
+                logger.info("  🗑️   Removing Architecture Center checkpoint for force-recrawl: %s", cp)
+                cp.unlink()
+            config = MSLearnCrawlerConfig(
+                checkpoint_path=str(cp),
+                seeds=list(ARCHITECTURE_CENTER_SEEDS),
+                **({"max_pages": max_pages} if max_pages is not None else {}),
+            )
+            return MSLearnCrawler(config)
+
+        if source == "well_architected":
+            if MSLearnCrawler is None:
+                logger.warning(
+                    "MSLearnCrawler is not available — skipping 'well_architected' source."
+                )
+                return None
+            cp = checkpoint_dir / "well_architected_checkpoint.json"
+            if force and cp.exists():
+                logger.info("  🗑️   Removing Well-Architected checkpoint for force-recrawl: %s", cp)
+                cp.unlink()
+            config = MSLearnCrawlerConfig(
+                checkpoint_path=str(cp),
+                seeds=list(WAF_SEEDS),
+                **({"max_pages": max_pages} if max_pages is not None else {}),
+            )
+            return MSLearnCrawler(config)
 
         # Should never reach here — validated in __init__
         raise ValueError(f"No crawler registered for source '{source}'")

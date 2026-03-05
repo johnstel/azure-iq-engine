@@ -92,6 +92,36 @@ IQ_LAYER_PREFIXES: dict[str, list[str]] = {
     ],
 }
 
+# Seed URLs for Azure Architecture Center content
+ARCHITECTURE_CENTER_SEEDS: list[str] = [
+    "https://learn.microsoft.com/en-us/azure/architecture/",
+    "https://learn.microsoft.com/en-us/azure/architecture/browse/",
+    "https://learn.microsoft.com/en-us/azure/architecture/patterns/",
+]
+
+# Seed URLs for Azure Well-Architected Framework content
+WAF_SEEDS: list[str] = [
+    "https://learn.microsoft.com/en-us/azure/well-architected/",
+    "https://learn.microsoft.com/en-us/azure/well-architected/reliability/",
+    "https://learn.microsoft.com/en-us/azure/well-architected/security/",
+    "https://learn.microsoft.com/en-us/azure/well-architected/cost-optimization/",
+    "https://learn.microsoft.com/en-us/azure/well-architected/operational-excellence/",
+    "https://learn.microsoft.com/en-us/azure/well-architected/performance-efficiency/",
+]
+
+# URL path prefixes for Architecture Center (cross-cutting — tags determined by content)
+ARCHITECTURE_CENTER_PREFIXES: list[str] = [
+    "/en-us/azure/architecture",
+]
+
+# URL path prefixes for Well-Architected Framework (cross-cutting — tags determined by content)
+WAF_PREFIXES: list[str] = [
+    "/en-us/azure/well-architected",
+]
+
+# Combined cross-cutting prefixes (Architecture Center + WAF) — used by IQ layer detection
+CROSS_CUTTING_PREFIXES: list[str] = ARCHITECTURE_CENTER_PREFIXES + WAF_PREFIXES
+
 # Allowed URL prefixes — pages outside these are skipped
 ALLOWED_PREFIXES: list[str] = sorted(
     set(
@@ -99,6 +129,8 @@ ALLOWED_PREFIXES: list[str] = sorted(
         for prefixes in IQ_LAYER_PREFIXES.values()
         for prefix in prefixes
     )
+    | set(ARCHITECTURE_CENTER_PREFIXES)
+    | set(WAF_PREFIXES)
 )
 
 # MS Learn host
@@ -596,6 +628,9 @@ def _detect_iq_layers(url: str, content: str) -> list[str]:
 
     Priority: URL path match (deterministic) → content keyword fallback.
     A page can belong to multiple layers.
+
+    Architecture Center and Well-Architected Framework pages are cross-cutting
+    and are tagged via content keyword detection.
     """
     parsed_path = urlparse(url).path
     layers: set[str] = set()
@@ -604,9 +639,10 @@ def _detect_iq_layers(url: str, content: str) -> list[str]:
         if any(parsed_path.startswith(pfx) for pfx in prefixes):
             layers.add(layer)
 
-    # Content-level fallback: look for layer mentions in the body
-    if not layers:
-        lower = content.lower()
+    # Content-level fallback: look for layer mentions in the body.
+    # Also used for Architecture Center and WAF pages (cross-cutting content).
+    lower = content.lower()
+    if not layers or any(parsed_path.startswith(pfx) for pfx in CROSS_CUTTING_PREFIXES):
         if any(kw in lower for kw in ("fabric iq", "microsoft fabric", "real-time intelligence", "onelake")):
             layers.add("fabric-iq")
         if any(kw in lower for kw in ("ai foundry", "azure openai", "ai studio", "cognitive services")):
@@ -839,6 +875,17 @@ class MSLearnCrawler:
             len(cp.failed),
         )
         return self._documents
+
+    async def crawl_all(self) -> list[dict[str, Any]]:
+        """
+        Execute the full crawl and return results as plain dicts.
+
+        This is the interface expected by the orchestrator's ``_crawl_source_guarded``
+        method.  Internally delegates to ``crawl()`` and converts each
+        ``CrawledDocument`` to a dict via ``to_index_dict()``.
+        """
+        docs = await self.crawl()
+        return [doc.to_index_dict() for doc in docs]
 
     # ------------------------------------------------------------------
     # Internal orchestration

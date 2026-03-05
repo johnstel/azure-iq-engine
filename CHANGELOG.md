@@ -2,6 +2,16 @@
 
 All notable changes to Azure IQ Engine will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- **Ingestion Pipeline:**
+  - Azure Architecture Center content source (`architecture_center`) — crawls reference architectures, patterns, and best practices from `learn.microsoft.com/en-us/azure/architecture/`. IQ layer tags derived from content keywords (cross-cutting).
+  - Well-Architected Framework content source (`well_architected`) — crawls all five WAF pillars (reliability, security, cost optimization, operational excellence, performance efficiency) from `learn.microsoft.com/en-us/azure/well-architected/`. IQ layer tags derived from content keywords (cross-cutting).
+  - `MSLearnCrawler.crawl_all()` method — uniform `crawl_all()` interface consistent with all other crawlers, used by the orchestrator.
+  - Architecture Center and WAF URL prefixes added to the allowed crawl boundary in `MSLearnCrawler`.
+  - Improved IQ layer detection: Architecture Center and WAF pages always use content-keyword fallback to tag across `fabric-iq`, `foundry-iq`, and `work-iq`.
+
 ## [0.1.0] - 2026-03-04
 
 ### Added
