@@ -66,12 +66,28 @@ class Settings(BaseSettings):
         description="Default number of search results to retrieve for RAG",
     )
 
-    # ── Bing Search ─────────────────────────────────────────────────────────
-    bing_api_key: str = Field(
+    # ── Grounding with Bing Search ──────────────────────────────────────────
+    bing_grounding_connection_id: str = Field(
         default="",
-        description="Bing Search v7 API key (BING_API_KEY)",
+        description=(
+            "Grounding with Bing Search connection ID for Azure AI Foundry "
+            "(BING_GROUNDING_CONNECTION_ID). Format: "
+            "/subscriptions/{sub}/resourceGroups/{rg}/providers/"
+            "Microsoft.CognitiveServices/accounts/{account}/"
+            "connections/{connection-name}"
+        ),
     )
-    bing_endpoint: str = "https://api.bing.microsoft.com/v7.0/search"
+    bing_grounding_endpoint: str = Field(
+        default="",
+        description=(
+            "Grounding with Bing Search resource endpoint "
+            "(BING_GROUNDING_ENDPOINT). e.g. https://api.bing.microsoft.com/v7.0"
+        ),
+    )
+    bing_grounding_key: str = Field(
+        default="",
+        description="Grounding with Bing Search API key (BING_GROUNDING_KEY)",
+    )
 
     # ── Rate limiting ────────────────────────────────────────────────────────
     rate_limit_query_rpm: int = Field(
@@ -152,7 +168,7 @@ class Settings(BaseSettings):
 
     @property
     def has_bing(self) -> bool:
-        return bool(self.bing_api_key)
+        return bool(self.bing_grounding_key and self.bing_grounding_endpoint)
 
 
 @lru_cache(maxsize=1)

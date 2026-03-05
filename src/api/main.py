@@ -382,36 +382,96 @@ def _extract_iq_layers(text: str) -> list[str]:
 
 
 async def _bing_search(query: str, count: int = 5) -> list[Citation]:
-    """Perform a Bing Web Search and return citations."""
+    """
+    Search the web via Grounding with Bing Search (Azure AI Foundry native).
+
+    Uses the chat completions API with a ``data_sources`` extension of type
+    ``bing_grounding`` so the LLM receives grounded web context.  Citations
+    are extracted from the ``context.citations`` block in the response.
+    """
     settings = get_settings()
     if not settings.has_bing:
-        logger.warning("BING_API_KEY not configured — skipping web search")
+        logger.warning(
+            "BING_GROUNDING_KEY/ENDPOINT not configured — skipping web search"
+        )
         return []
 
+    # Build the chat completions request with Bing grounding data source
+    chat_url = (
+        f"{settings.foundry_base_url}/openai/deployments/{settings.openai_deployment}"
+        f"/chat/completions?api-version=2024-10-21"
+    )
+
+    payload = {
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "You are a research assistant. Search the web for the user's "
+                    "query and return a concise summary with source citations."
+                ),
+            },
+            {"role": "user", "content": query},
+        ],
+        "data_sources": [
+            {
+                "type": "bing_grounding",
+                "parameters": {
+                    "endpoint": settings.bing_grounding_endpoint,
+                    "key": settings.bing_grounding_key,
+                    "count": count,
+                },
+            }
+        ],
+        "temperature": 0.3,
+        "max_tokens": 1000,
+    }
+
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(
-                settings.bing_endpoint,
-                params={"q": query, "count": count, "mkt": "en-US"},
-                headers={"Ocp-Apim-Subscription-Key": settings.bing_api_key},
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                chat_url,
+                headers={
+                    "api-key": settings.foundry_key,
+                    "Content-Type": "application/json",
+                },
+                json=payload,
             )
             resp.raise_for_status()
             data = resp.json()
     except httpx.HTTPError as exc:
-        logger.warning("Bing search failed: %s", exc)
+        logger.warning("Grounding with Bing search failed: %s", exc)
         return []
 
+    # Extract citations from the response context
     citations: list[Citation] = []
-    for page in data.get("webPages", {}).get("value", []):
+    choice = data.get("choices", [{}])[0]
+    message = choice.get("message", {})
+    context = message.get("context", {})
+
+    for cite in context.get("citations", []):
         citations.append(
             Citation(
-                source_url=page.get("url", ""),
-                title=page.get("name", ""),
+                source_url=cite.get("url", ""),
+                title=cite.get("title", ""),
                 relevance_score=0.7,
-                snippet=page.get("snippet", ""),
-                source_type="bing-web",
+                snippet=cite.get("content", "")[:500],
+                source_type="bing-grounding",
             )
         )
+
+    # If no structured citations, at least return the grounded answer as context
+    if not citations and message.get("content"):
+        citations.append(
+            Citation(
+                source_url="",
+                title=f"Web research: {query[:80]}",
+                relevance_score=0.6,
+                snippet=message["content"][:500],
+                source_type="bing-grounding",
+            )
+        )
+
     return citations
 
 

@@ -282,24 +282,117 @@ async def bing_web_search(
     count: int = 5,
 ) -> list[dict]:
     """
-    Search the web for current information on a topic.
+    Search the web using Grounding with Bing Search (Azure AI Foundry native).
 
-    TODO: Replace this implementation with Azure AI Foundry Grounding with Bing Search
-    (https://learn.microsoft.com/azure/ai-services/openai/how-to/use-your-data-securely).
-    The pattern is to attach a `data_sources` element of type "bing_search" to the
-    /chat/completions request using the Grounding with Bing Search resource connection
-    string.  This requires a separate Grounding with Bing Search Azure resource.
-
-    For MVP: falls back to the IQ corpus as the authoritative ground truth.
+    Uses the chat completions API with ``data_sources`` of type ``bing_grounding``
+    for grounded web results.  Falls back to IQ corpus search if Bing grounding
+    credentials are not configured.
     """
+    base_url = os.getenv("FOUNDRY_BASE_URL", "").rstrip("/")
+    foundry_key = os.getenv("FOUNDRY_KEY")
+    bing_endpoint = os.getenv("BING_GROUNDING_ENDPOINT", "")
+    bing_key = os.getenv("BING_GROUNDING_KEY", "")
+    deployment = os.getenv("OPENAI_DEPLOYMENT", "Kimi-K2.5")
+
+    if not all([base_url, foundry_key, bing_endpoint, bing_key]):
+        logger.warning(
+            "Bing grounding not configured — falling back to IQ corpus search"
+        )
+        results = await search_iq_corpus(query=query, max_results=count)
+        return [
+            {
+                "title": r["title"],
+                "url": r["source_url"],
+                "snippet": r["content"],
+                "score": r["score"],
+            }
+            for r in results
+        ]
+
+    chat_url = (
+        f"{base_url}/openai/deployments/{deployment}"
+        f"/chat/completions?api-version=2024-10-21"
+    )
+
+    payload = {
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "You are a research assistant. Search the web and return a "
+                    "concise summary with key facts, URLs, and source citations."
+                ),
+            },
+            {"role": "user", "content": query},
+        ],
+        "data_sources": [
+            {
+                "type": "bing_grounding",
+                "parameters": {
+                    "endpoint": bing_endpoint,
+                    "key": bing_key,
+                    "count": count,
+                },
+            }
+        ],
+        "temperature": 0.3,
+        "max_tokens": 1000,
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                chat_url,
+                headers={"api-key": foundry_key, "Content-Type": "application/json"},
+                json=payload,
+            )
+            if resp.status_code != 200:
+                logger.warning(
+                    "Bing grounding returned %d: %s",
+                    resp.status_code,
+                    resp.text[:300],
+                )
+                # Fall back to corpus
+                results = await search_iq_corpus(query=query, max_results=count)
+                return [
+                    {"title": r["title"], "url": r["source_url"],
+                     "snippet": r["content"], "score": r["score"]}
+                    for r in results
+                ]
+
+            data = resp.json()
+            choice = data.get("choices", [{}])[0]
+            message = choice.get("message", {})
+            context = message.get("context", {})
+
+            web_results: list[dict] = []
+            for cite in context.get("citations", []):
+                web_results.append({
+                    "title": cite.get("title", ""),
+                    "url": cite.get("url", ""),
+                    "snippet": cite.get("content", "")[:500],
+                    "score": 0.7,
+                })
+
+            # Include the grounded answer if no structured citations
+            if not web_results and message.get("content"):
+                web_results.append({
+                    "title": f"Web research: {query[:80]}",
+                    "url": "",
+                    "snippet": message["content"][:500],
+                    "score": 0.6,
+                })
+
+            return web_results
+
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("bing_web_search grounding request failed: %s", exc)
+
+    # Ultimate fallback
     results = await search_iq_corpus(query=query, max_results=count)
     return [
-        {
-            "title": r["title"],
-            "url": r["source_url"],
-            "snippet": r["content"],
-            "score": r["score"],
-        }
+        {"title": r["title"], "url": r["source_url"],
+         "snippet": r["content"], "score": r["score"]}
         for r in results
     ]
 
