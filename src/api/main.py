@@ -1296,7 +1296,6 @@ async def ingest_status(job_id: str) -> IngestJobStatus:
 # ── Cache management ──────────────────────────────────────────────────────────
 
 # _require_admin_key moved above ingestion section
-        raise HTTPException(status_code=403, detail="Invalid or missing X-Admin-Key header")
 
 
 @app.post(
