@@ -1227,6 +1227,18 @@ async def quiz_generate(req: QuizRequest) -> JSONResponse:
     })
 
 
+# ── Admin auth ────────────────────────────────────────────────────────────────
+
+def _require_admin_key(x_admin_key: str | None = Header(default=None)) -> None:
+    """
+    Dependency that enforces the ADMIN_API_KEY when it is configured.
+    """
+    settings = get_settings()
+    required = settings.admin_api_key
+    if required and x_admin_key != required:
+        raise HTTPException(status_code=403, detail="Invalid or missing X-Admin-Key header")
+
+
 # ── Ingestion ─────────────────────────────────────────────────────────────────
 
 @app.post(
@@ -1283,15 +1295,7 @@ async def ingest_status(job_id: str) -> IngestJobStatus:
 
 # ── Cache management ──────────────────────────────────────────────────────────
 
-def _require_admin_key(x_admin_key: str | None = Header(default=None)) -> None:
-    """
-    Dependency that enforces the ADMIN_API_KEY when it is configured.
-
-    If ADMIN_API_KEY is empty (dev/local), all requests are allowed through.
-    """
-    settings = get_settings()
-    required = settings.admin_api_key
-    if required and x_admin_key != required:
+# _require_admin_key moved above ingestion section
         raise HTTPException(status_code=403, detail="Invalid or missing X-Admin-Key header")
 
 
