@@ -91,6 +91,8 @@
   .md hr { border: none; border-top: 1px solid var(--border); margin: 10px 0; }
 
   /* Citations */
+  .citation-ref { color: var(--blue-light); text-decoration: none; font-weight: 600; font-size: 0.85em; vertical-align: super; cursor: pointer; }
+  .citation-ref:hover { text-decoration: underline; }
   .citations { margin-top: 8px; }
   .citations-toggle { font-size: 11px; color: var(--text-muted); cursor: pointer; display: flex; align-items: center; gap: 4px; background: none; border: none; padding: 0; }
   .citations-toggle:hover { color: var(--blue-light); }
@@ -198,9 +200,9 @@
     </div>
     <span class="version-badge" id="version-badge">v0.3.0</span>
     <div class="header-actions">
-      <button class="hdr-btn" id="clear-history-btn" title="Clear chat history">🗑️</button>
-      <button class="hdr-btn" id="export-md-btn" title="Export as Markdown">📥</button>
-      <button class="hdr-btn" id="theme-toggle-btn" aria-label="Toggle dark/light theme" title="Toggle light/dark theme">🌙</button>
+      <button type="button" class="hdr-btn" id="clear-history-btn" aria-label="Clear chat history" title="Clear chat history">🗑️</button>
+      <button type="button" class="hdr-btn" id="export-md-btn" aria-label="Export as Markdown" title="Export as Markdown">📥</button>
+      <button type="button" class="hdr-btn" id="theme-toggle-btn" aria-label="Toggle dark/light theme" title="Toggle light/dark theme">🌙</button>
     </div>
   </header>
 
@@ -214,12 +216,12 @@
 
   <!-- Quick actions -->
   <div class="quick-actions" id="quick-actions">
-    <button class="quick-btn" data-fill="What's new this week in Microsoft IQ?">⚡ What's new?</button>
-    <button class="quick-btn" data-fill="Compare Microsoft IQ vs competitors — key differentiators?">⚖️ Compare vs competitors</button>
-    <button class="quick-btn" data-fill="Explain the Fabric IQ ontology and data model">🧩 Fabric IQ ontology</button>
-    <button class="quick-btn" data-fill="What Azure services power Work IQ?">💼 Work IQ services</button>
-    <button class="quick-btn" data-fill="How does Foundry IQ integrate with Azure AI Foundry?">🏭 Foundry IQ</button>
-    <button class="quick-btn" data-research>🏢 Research a company</button>
+    <button type="button" class="quick-btn" data-fill="What's new this week in Microsoft IQ?">⚡ What's new?</button>
+    <button type="button" class="quick-btn" data-fill="Compare Microsoft IQ vs competitors — key differentiators?">⚖️ Compare vs competitors</button>
+    <button type="button" class="quick-btn" data-fill="Explain the Fabric IQ ontology and data model">🧩 Fabric IQ ontology</button>
+    <button type="button" class="quick-btn" data-fill="What Azure services power Work IQ?">💼 Work IQ services</button>
+    <button type="button" class="quick-btn" data-fill="How does Foundry IQ integrate with Azure AI Foundry?">🏭 Foundry IQ</button>
+    <button type="button" class="quick-btn" data-research>🏢 Research a company</button>
   </div>
 
   <!-- Main content -->
@@ -251,7 +253,7 @@
         </div>
         <div class="input-row">
           <textarea class="msg-input" id="msg-input" placeholder="Ask about Microsoft IQ, Fabric IQ, Foundry IQ…" rows="1"></textarea>
-          <button class="send-btn" id="send-btn" aria-label="Send question">Send</button>
+          <button type="button" class="send-btn" id="send-btn" aria-label="Send question">Send</button>
         </div>
       </div>
     </div>
@@ -289,7 +291,7 @@
             <label class="checkbox-label"><input type="checkbox" value="use_cases"> Use Cases</label>
           </div>
         </div>
-        <button class="research-btn" id="research-btn">🔍 Generate IQ Assessment</button>
+        <button type="button" class="research-btn" id="research-btn">🔍 Generate IQ Assessment</button>
       </div>
       <div class="research-result" id="research-result" style="display:none"></div>
     </div>
@@ -303,7 +305,7 @@
           <select class="form-select" id="explore-source-filter" style="max-width:180px;">
             <option value="">All sources</option>
           </select>
-          <button class="send-btn" id="explore-search-btn">Search</button>
+          <button type="button" class="send-btn" id="explore-search-btn">Search</button>
         </div>
         <div id="explore-results"></div>
         <div id="explore-empty" style="text-align:center; color:var(--text-muted); padding:40px;">
@@ -332,7 +334,7 @@
             <option value="intermediate" selected>Intermediate</option>
             <option value="advanced">Advanced</option>
           </select>
-          <button class="send-btn" id="quiz-start-btn">Generate Quiz</button>
+          <button type="button" class="send-btn" id="quiz-start-btn">Generate Quiz</button>
         </div>
         <div id="quiz-score" style="display:none; background:var(--bg3); border:1px solid var(--border); border-radius:var(--radius); padding:12px; margin-bottom:16px;">
           <div style="display:flex; justify-content:space-between; align-items:center;">
@@ -474,6 +476,11 @@ function exportAsMarkdown() {
   a.download = `iq-engine-chat-${Date.now()}.md`;
   a.click();
   URL.revokeObjectURL(a.href);
+  // Visual feedback
+  const btn = document.getElementById('export-md-btn');
+  const orig = btn.textContent;
+  btn.textContent = '✅';
+  setTimeout(() => { btn.textContent = orig; }, 1500);
 }
 
 function restoreHistoryToDOM() {
@@ -516,8 +523,12 @@ restoreHistoryToDOM();
 document.querySelectorAll('.tab').forEach(tab => {
   tab.addEventListener('click', () => {
     currentTab = tab.dataset.tab;
-    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.tab').forEach(t => {
+      t.classList.remove('active');
+      t.setAttribute('aria-selected', 'false');
+    });
     tab.classList.add('active');
+    tab.setAttribute('aria-selected', 'true');
     askPanel.style.display = currentTab === 'ask' ? 'flex' : 'none';
     researchPanel.classList.toggle('active', currentTab === 'research');
     explorePanel.style.display = currentTab === 'explore' ? 'flex' : 'none';
@@ -642,9 +653,24 @@ function _renderAssistantBubble(data, agent, elapsed) {
       </div>`;
   }
 
+  // Make inline citation refs [1], [2] etc. clickable
+  let renderedContent = renderMarkdown(content);
+  if (citations.length > 0) {
+    renderedContent = renderedContent.replace(/\[(\d+)\]/g, (match, num) => {
+      const idx = parseInt(num) - 1;
+      if (idx >= 0 && idx < citations.length) {
+        const c = citations[idx];
+        const url = c.source_url || '#';
+        const title = (c.title || '').replace(/"/g, '&quot;');
+        return `<a href="${escHtml(url)}" target="_blank" rel="noopener" class="citation-ref" title="${title}">[${num}]</a>`;
+      }
+      return match;
+    });
+  }
+
   div.innerHTML = `
     <div class="msg-bubble">
-      <div class="md">${renderMarkdown(content)}</div>
+      <div class="md">${renderedContent}</div>
       ${citationsHtml}
     </div>
     <div class="msg-meta">${metaParts.join('')}</div>`;
@@ -1053,7 +1079,7 @@ function renderQuizResults() {
       <div style="font-size:48px;margin-bottom:12px;">${emoji}</div>
       <div style="font-size:20px;font-weight:600;color:var(--text);margin-bottom:4px;">${grade}</div>
       <div style="font-size:14px;color:var(--text-dim);margin-bottom:16px;">You got ${correct} out of ${questions.length} correct (${pct}%)</div>
-      <button class="send-btn" onclick="document.getElementById('quiz-start-btn').click()" style="font-size:14px;padding:10px 24px;">Try Again</button>
+      <button type="button" class="send-btn" onclick="document.getElementById('quiz-start-btn').click()" style="font-size:14px;padding:10px 24px;">Try Again</button>
     </div>`;
 
   // Save to localStorage

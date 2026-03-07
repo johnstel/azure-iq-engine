@@ -158,17 +158,29 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    # Rate limiting
+    # Rate limiting — per-worker sliding window.
+    # With --workers N, effective RPM is N × configured RPM.
+    # We halve the per-worker limit to approximate correct totals with 2 workers.
+    # TODO: Replace with Redis-backed rate limiter for production (#52).
+    worker_divisor = 2  # uvicorn --workers 2
     app.add_middleware(
         RateLimitMiddleware,
         rules=[
             RateLimitRule(
                 path_prefix="/api/query",
-                rpm=settings.rate_limit_query_rpm,
+                rpm=max(1, settings.rate_limit_query_rpm // worker_divisor),
             ),
             RateLimitRule(
                 path_prefix="/api/research",
-                rpm=settings.rate_limit_research_rpm,
+                rpm=max(1, settings.rate_limit_research_rpm // worker_divisor),
+            ),
+            RateLimitRule(
+                path_prefix="/api/quiz",
+                rpm=max(1, settings.rate_limit_query_rpm // worker_divisor),
+            ),
+            RateLimitRule(
+                path_prefix="/api/ingest",
+                rpm=2,
             ),
         ],
     )
@@ -449,92 +461,49 @@ def _extract_iq_layers(text: str) -> list[str]:
 
 async def _bing_search(query: str, count: int = 5) -> list[Citation]:
     """
-    Search the web via Grounding with Bing Search (Azure AI Foundry native).
+    Search the web via Bing Web Search API v7 (direct REST call).
 
-    Uses the chat completions API with a ``data_sources`` extension of type
-    ``bing_grounding`` so the LLM receives grounded web context.  Citations
-    are extracted from the ``context.citations`` block in the response.
+    Falls back gracefully when API key/endpoint are not configured or the
+    request fails. Returns Citation objects built from organic web results.
     """
     settings = get_settings()
     if not settings.has_bing:
-        logger.warning(
-            "BING_GROUNDING_KEY/ENDPOINT not configured — skipping web search"
-        )
+        logger.debug("BING_GROUNDING_KEY not configured — skipping web search")
         return []
 
-    # Build the chat completions request with Bing grounding data source
-    chat_url = (
-        f"{settings.foundry_base_url}/openai/deployments/{settings.openai_deployment}"
-        f"/chat/completions?api-version=2024-10-21"
-    )
+    # Use Bing Web Search API v7 directly
+    search_url = f"{settings.bing_grounding_endpoint}/search"
 
-    payload = {
-        "messages": [
-            {
-                "role": "system",
-                "content": (
-                    "You are a research assistant. Search the web for the user's "
-                    "query and return a concise summary with source citations."
-                ),
-            },
-            {"role": "user", "content": query},
-        ],
-        "data_sources": [
-            {
-                "type": "bing_grounding",
-                "parameters": {
-                    "endpoint": settings.bing_grounding_endpoint,
-                    "key": settings.bing_grounding_key,
-                    "count": count,
-                },
-            }
-        ],
-        "temperature": 0.3,
-        "max_tokens": 1000,
+    params = {
+        "q": query,
+        "count": count,
+        "mkt": "en-US",
+        "responseFilter": "Webpages",
     }
 
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.post(
-                chat_url,
-                headers={
-                    "api-key": settings.foundry_key,
-                    "Content-Type": "application/json",
-                },
-                json=payload,
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(
+                search_url,
+                params=params,
+                headers={"Ocp-Apim-Subscription-Key": settings.bing_grounding_key},
             )
             resp.raise_for_status()
             data = resp.json()
     except httpx.HTTPError as exc:
-        logger.warning("Grounding with Bing search failed: %s", exc)
+        logger.warning("Bing Web Search failed: %s", exc)
         return []
 
-    # Extract citations from the response context
+    # Extract organic web results
     citations: list[Citation] = []
-    choice = data.get("choices", [{}])[0]
-    message = choice.get("message", {})
-    context = message.get("context", {})
-
-    for cite in context.get("citations", []):
+    for result in data.get("webPages", {}).get("value", [])[:count]:
         citations.append(
             Citation(
-                source_url=cite.get("url", ""),
-                title=cite.get("title", ""),
+                source_url=result.get("url", ""),
+                title=result.get("name", ""),
                 relevance_score=0.7,
-                snippet=cite.get("content", "")[:500],
-                source_type="bing-grounding",
-            )
-        )
-
-    # If no structured citations, at least return the grounded answer as context
-    if not citations and message.get("content"):
-        citations.append(
-            Citation(
-                source_url="",
-                title=f"Web research: {query[:80]}",
-                relevance_score=0.6,
-                snippet=message["content"][:500],
-                source_type="bing-grounding",
+                snippet=result.get("snippet", "")[:500],
+                source_type="bing-web",
             )
         )
 
